@@ -45,12 +45,11 @@ router.get('/', authenticateToken, async (req, res) => {
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
     const gameId = req.params.id;
-      
+    
     // Validate that gameId is a number
     if (isNaN(parseInt(gameId))) {
       return res.status(400).json({ error: 'Invalid game ID' });
     }
-    
     const gameResult = await pool.query(`
       SELECT g.*, 
         json_agg(
