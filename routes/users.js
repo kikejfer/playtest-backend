@@ -202,17 +202,23 @@ router.post('/blocks/:blockId', authenticateToken, async (req, res) => {
     
     let loadedBlocks = userResult.rows[0]?.loaded_blocks || [];
     
+    // Ensure loadedBlocks is an array
+    if (!Array.isArray(loadedBlocks)) {
+      console.warn('⚠️ loaded_blocks is not an array, converting:', loadedBlocks);
+      loadedBlocks = [];
+    }
+    
     // Add block if not already loaded
     if (!loadedBlocks.includes(blockId)) {
       loadedBlocks.push(blockId);
       
       // Update user profile
       await pool.query(`
-        INSERT INTO user_profiles (user_id, loaded_blocks) 
-        VALUES ($1, $2) 
+        INSERT INTO user_profiles (user_id, loaded_blocks, stats, answer_history, preferences) 
+        VALUES ($1, $2::jsonb, '{}'::jsonb, '[]'::jsonb, '{}'::jsonb) 
         ON CONFLICT (user_id) 
-        DO UPDATE SET loaded_blocks = $2, updated_at = CURRENT_TIMESTAMP
-      `, [req.user.id, loadedBlocks]);
+        DO UPDATE SET loaded_blocks = $2::jsonb, updated_at = CURRENT_TIMESTAMP
+      `, [req.user.id, JSON.stringify(loadedBlocks)]);
     }
     
     res.json({ 

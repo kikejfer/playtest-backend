@@ -385,17 +385,23 @@ router.post('/:id/load', authenticateToken, async (req, res) => {
     
     let loadedBlocks = userResult.rows[0]?.loaded_blocks || [];
     
-    // Add block if not already loaded (ensure types match)
+    // Ensure loadedBlocks is an array
+    if (!Array.isArray(loadedBlocks)) {
+      console.warn('⚠️ loaded_blocks is not an array, converting:', loadedBlocks);
+      loadedBlocks = [];
+    }
+    
+    // Add block if not already loaded
     if (!loadedBlocks.includes(blockId)) {
       loadedBlocks.push(blockId);
       
-      // Update user profile
+      // Update user profile - ensure all required fields exist
       await pool.query(`
-        INSERT INTO user_profiles (user_id, loaded_blocks) 
-        VALUES ($1, $2) 
+        INSERT INTO user_profiles (user_id, loaded_blocks, stats, answer_history, preferences) 
+        VALUES ($1, $2::jsonb, '{}'::jsonb, '[]'::jsonb, '{}'::jsonb) 
         ON CONFLICT (user_id) 
-        DO UPDATE SET loaded_blocks = $2, updated_at = CURRENT_TIMESTAMP
-      `, [req.user.id, loadedBlocks]);
+        DO UPDATE SET loaded_blocks = $2::jsonb, updated_at = CURRENT_TIMESTAMP
+      `, [req.user.id, JSON.stringify(loadedBlocks)]);
     }
     
     res.json({ message: 'Block loaded successfully' });
@@ -418,16 +424,22 @@ router.delete('/:id/load', authenticateToken, async (req, res) => {
     
     let loadedBlocks = userResult.rows[0]?.loaded_blocks || [];
     
+    // Ensure loadedBlocks is an array
+    if (!Array.isArray(loadedBlocks)) {
+      console.warn('⚠️ loaded_blocks is not an array, converting:', loadedBlocks);
+      loadedBlocks = [];
+    }
+    
     // Remove block
     loadedBlocks = loadedBlocks.filter(id => id !== blockId);
     
     // Update user profile
     await pool.query(`
-      INSERT INTO user_profiles (user_id, loaded_blocks) 
-      VALUES ($1, $2) 
+      INSERT INTO user_profiles (user_id, loaded_blocks, stats, answer_history, preferences) 
+      VALUES ($1, $2::jsonb, '{}'::jsonb, '[]'::jsonb, '{}'::jsonb) 
       ON CONFLICT (user_id) 
-      DO UPDATE SET loaded_blocks = $2, updated_at = CURRENT_TIMESTAMP
-    `, [req.user.id, loadedBlocks]);
+      DO UPDATE SET loaded_blocks = $2::jsonb, updated_at = CURRENT_TIMESTAMP
+    `, [req.user.id, JSON.stringify(loadedBlocks)]);
     
     res.json({ message: 'Block unloaded successfully' });
   } catch (error) {
@@ -458,7 +470,8 @@ router.post('/', authenticateToken, async (req, res) => {
 
     // Try to auto-load the block (non-critical - if it fails, still return success)
     try {
-      const blockId = newBlock.id;
+      const blockIdInt = parseInt(newBlock.id);
+      console.log('🔄 Auto-loading block:', blockIdInt);
       
       // Get current loaded blocks
       const userResult = await pool.query(
@@ -467,25 +480,34 @@ router.post('/', authenticateToken, async (req, res) => {
       );
       
       let loadedBlocks = userResult.rows[0]?.loaded_blocks || [];
-      console.log('📋 Current loaded blocks:', loadedBlocks);
+      console.log('📋 Current loaded blocks:', loadedBlocks, typeof loadedBlocks);
       
-      // Add the new block if not already loaded (ensure types match)
-      const blockIdInt = parseInt(blockId);
+      // Ensure loadedBlocks is an array
+      if (!Array.isArray(loadedBlocks)) {
+        console.warn('⚠️ loaded_blocks is not an array, converting:', loadedBlocks);
+        loadedBlocks = [];
+      }
+      
+      // Add the new block if not already loaded
       if (!loadedBlocks.includes(blockIdInt)) {
         loadedBlocks.push(blockIdInt);
+        console.log('📋 Updated loaded blocks array:', loadedBlocks);
         
-        // Update user profile with new loaded block
+        // Ensure we create the user_profiles record if it doesn't exist
         await pool.query(`
-          INSERT INTO user_profiles (user_id, loaded_blocks) 
-          VALUES ($1, $2::jsonb) 
+          INSERT INTO user_profiles (user_id, loaded_blocks, stats, answer_history, preferences) 
+          VALUES ($1, $2::jsonb, '{}'::jsonb, '[]'::jsonb, '{}'::jsonb) 
           ON CONFLICT (user_id) 
           DO UPDATE SET loaded_blocks = $2::jsonb, updated_at = CURRENT_TIMESTAMP
         `, [req.user.id, JSON.stringify(loadedBlocks)]);
         
         console.log('✅ Block automatically loaded for creator');
+      } else {
+        console.log('ℹ️ Block already loaded, skipping');
       }
     } catch (autoLoadError) {
-      console.warn('⚠️ Auto-load failed (non-critical):', autoLoadError.message);
+      console.error('❌ Auto-load failed (non-critical):', autoLoadError.message);
+      console.error('❌ Auto-load error details:', autoLoadError);
       // Don't fail the whole request if auto-load fails
     }
 
