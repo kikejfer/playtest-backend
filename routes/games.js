@@ -265,6 +265,7 @@ router.get('/history', authenticateToken, async (req, res) => {
       SELECT DISTINCT
         g.id as game_id,
         g.game_type,
+        g.status,
         g.config,
         g.created_at,
         gs.score_data,
@@ -274,14 +275,17 @@ router.get('/history', authenticateToken, async (req, res) => {
       JOIN game_players gp ON g.id = gp.game_id
       LEFT JOIN game_scores gs ON g.id = gs.game_id
       LEFT JOIN blocks b ON CAST(b.id as TEXT) = ANY(SELECT jsonb_object_keys(g.config))
-      WHERE gp.user_id = $1 
-        AND g.status = 'completed'
+      WHERE gp.user_id = $1
       ORDER BY g.created_at DESC
       LIMIT 50
     `, [req.user.id]);
 
+    console.log('📈 Game history query returned', result.rows.length, 'rows');
+    console.log('📊 Raw history data:', result.rows);
+
     const history = result.rows.map(row => {
       const scoreData = row.score_data || {};
+      console.log('🎮 Processing game:', row.game_id, 'status:', row.status, 'scoreData:', scoreData);
       return {
         gameId: row.game_id,
         mode: getGameModeDisplay(row.game_type),
@@ -289,10 +293,12 @@ router.get('/history', authenticateToken, async (req, res) => {
         correct: scoreData.score || 0,
         incorrect: Math.max(0, (scoreData.totalQuestions || 0) - (scoreData.score || 0)),
         date: row.created_at,
-        score: calculateScore(scoreData.score || 0, scoreData.totalQuestions || 1)
+        score: calculateScore(scoreData.score || 0, scoreData.totalQuestions || 1),
+        status: row.status // Add status for debugging
       };
     });
 
+    console.log('📋 Processed history:', history);
     res.json(history);
   } catch (error) {
     console.error('Error fetching game history:', error);
