@@ -60,7 +60,7 @@ router.get('/history', authenticateToken, async (req, res) => {
       LEFT JOIN blocks b ON CAST(b.id as TEXT) = ANY(SELECT jsonb_object_keys(g.config))
       WHERE gp.user_id = $1
       ORDER BY g.created_at DESC
-      LIMIT 50
+      LIMIT 10
     `, [req.user.id]);
 
     console.log('📈 Game history query returned', result.rows.length, 'rows');

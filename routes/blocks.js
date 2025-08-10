@@ -562,6 +562,78 @@ router.put('/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// Get detailed history for a block (for STATS)
+router.get('/:id/history', authenticateToken, async (req, res) => {
+  try {
+    const blockId = parseInt(req.params.id);
+    console.log('📊 Getting block history for block:', blockId, 'user:', req.user.id);
+
+    // Get user's answer history for this block
+    const userResult = await pool.query(
+      'SELECT answer_history FROM user_profiles WHERE user_id = $1',
+      [req.user.id]
+    );
+
+    const answerHistory = userResult.rows[0]?.answer_history || [];
+    console.log('📊 Total answer history entries:', answerHistory.length);
+
+    // Filter answers for this specific block and get last 20 results per question
+    const blockHistory = answerHistory.filter(entry => entry.blockId === blockId);
+    console.log('📊 Block-specific history entries:', blockHistory.length);
+
+    // Group by question and get last 20 results for each
+    const questionHistory = {};
+    
+    // Get all questions for this block first
+    const questionsResult = await pool.query(
+      'SELECT id, text_question FROM questions WHERE block_id = $1 ORDER BY created_at',
+      [blockId]
+    );
+
+    const questions = questionsResult.rows;
+    console.log('📊 Questions in block:', questions.length);
+
+    // Initialize each question with empty history
+    questions.forEach(question => {
+      questionHistory[question.id] = {
+        questionId: question.id,
+        questionText: question.text_question,
+        results: []
+      };
+    });
+
+    // Fill with actual results (last 20 per question)
+    blockHistory
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)) // Most recent first
+      .forEach(entry => {
+        if (questionHistory[entry.questionId] && questionHistory[entry.questionId].results.length < 20) {
+          questionHistory[entry.questionId].results.push({
+            result: entry.result, // 'ACIERTO' or 'FALLO'
+            timestamp: entry.timestamp,
+            responseTime: entry.responseTime
+          });
+        }
+      });
+
+    // Convert to array format
+    const historyArray = Object.values(questionHistory).map(q => ({
+      ...q,
+      results: q.results.reverse() // Show oldest first for chronological order
+    }));
+
+    console.log('📊 Returning history for', historyArray.length, 'questions');
+    res.json(historyArray);
+    
+  } catch (error) {
+    console.error('❌ Error fetching block history:', error);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message,
+      endpoint: '/blocks/:id/history'
+    });
+  }
+});
+
 // Delete block
 router.delete('/:id', authenticateToken, async (req, res) => {
   try {
