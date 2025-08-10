@@ -9,7 +9,7 @@ router.get('/profile', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT u.id, u.nickname, u.email, u.created_at,
-        up.answer_history, up.stats, up.preferences
+        up.answer_history, up.stats, up.preferences, up.loaded_blocks
       FROM users u
       LEFT JOIN user_profiles up ON u.id = up.user_id
       WHERE u.id = $1
@@ -27,7 +27,8 @@ router.get('/profile', authenticateToken, async (req, res) => {
       createdAt: user.created_at,
       answerHistory: user.answer_history || [],
       stats: user.stats || {},
-      preferences: user.preferences || {}
+      preferences: user.preferences || {},
+      loadedBlocks: user.loaded_blocks || []
     });
 
   } catch (error) {

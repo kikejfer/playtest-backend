@@ -267,14 +267,14 @@ router.post('/:id/load', authenticateToken, async (req, res) => {
   try {
     const blockId = parseInt(req.params.id);
     
-    // Check if block exists and is public
+    // Check if block exists and is accessible (public OR owned by user)
     const blockResult = await pool.query(
-      'SELECT id FROM blocks WHERE id = $1 AND is_public = true',
-      [blockId]
+      'SELECT id, creator_id, is_public FROM blocks WHERE id = $1 AND (is_public = true OR creator_id = $2)',
+      [blockId, req.user.id]
     );
     
     if (blockResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Block not found or not public' });
+      return res.status(404).json({ error: 'Block not found or not accessible' });
     }
     
     // Get current loaded blocks
@@ -338,25 +338,64 @@ router.delete('/:id/load', authenticateToken, async (req, res) => {
 
 // Create new block
 router.post('/', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
+    
     const { name, description, isPublic = true } = req.body;
 
     if (!name) {
       return res.status(400).json({ error: 'Block name is required' });
     }
 
-    const result = await pool.query(
+    // Create the block
+    const result = await client.query(
       'INSERT INTO blocks (name, description, creator_id, is_public) VALUES ($1, $2, $3, $4) RETURNING *',
       [name, description, req.user.id, isPublic]
     );
 
+    const newBlock = result.rows[0];
+    const blockId = newBlock.id;
+
+    // AUTOMATICALLY ADD TO USER'S LOADED BLOCKS (as per specification)
+    console.log('🔄 Auto-loading created block to user loaded_blocks');
+    
+    // Get current loaded blocks
+    const userResult = await client.query(
+      'SELECT loaded_blocks FROM user_profiles WHERE user_id = $1',
+      [req.user.id]
+    );
+    
+    let loadedBlocks = userResult.rows[0]?.loaded_blocks || [];
+    
+    // Add the new block if not already loaded
+    if (!loadedBlocks.includes(blockId)) {
+      loadedBlocks.push(blockId);
+      
+      // Update user profile with new loaded block
+      await client.query(`
+        INSERT INTO user_profiles (user_id, loaded_blocks) 
+        VALUES ($1, $2) 
+        ON CONFLICT (user_id) 
+        DO UPDATE SET loaded_blocks = $2, updated_at = CURRENT_TIMESTAMP
+      `, [req.user.id, loadedBlocks]);
+      
+      console.log('✅ Block automatically loaded for creator');
+    }
+
+    await client.query('COMMIT');
+
     res.status(201).json({
-      message: 'Block created successfully',
-      block: result.rows[0]
+      message: 'Block created successfully and automatically loaded',
+      block: newBlock,
+      autoLoaded: true
     });
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error('Error creating block:', error);
     res.status(500).json({ error: 'Internal server error' });
+  } finally {
+    client.release();
   }
 });
 
