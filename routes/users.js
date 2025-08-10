@@ -178,4 +178,51 @@ router.post('/stats', authenticateToken, async (req, res) => {
   }
 });
 
+// Add block to user's loaded blocks (legacy compatibility endpoint)
+router.post('/blocks/:blockId', authenticateToken, async (req, res) => {
+  try {
+    const blockId = parseInt(req.params.blockId);
+    
+    // Check if block exists
+    const blockResult = await pool.query(
+      'SELECT id FROM blocks WHERE id = $1',
+      [blockId]
+    );
+    
+    if (blockResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Block not found' });
+    }
+    
+    // Get current loaded blocks
+    const userResult = await pool.query(
+      'SELECT loaded_blocks FROM user_profiles WHERE user_id = $1',
+      [req.user.id]
+    );
+    
+    let loadedBlocks = userResult.rows[0]?.loaded_blocks || [];
+    
+    // Add block if not already loaded
+    if (!loadedBlocks.includes(blockId)) {
+      loadedBlocks.push(blockId);
+      
+      // Update user profile
+      await pool.query(`
+        INSERT INTO user_profiles (user_id, loaded_blocks) 
+        VALUES ($1, $2) 
+        ON CONFLICT (user_id) 
+        DO UPDATE SET loaded_blocks = $2, updated_at = CURRENT_TIMESTAMP
+      `, [req.user.id, loadedBlocks]);
+    }
+    
+    res.json({ 
+      message: 'Block added to user successfully',
+      loadedBlocks: loadedBlocks
+    });
+    
+  } catch (error) {
+    console.error('Error adding block to user:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 module.exports = router;
