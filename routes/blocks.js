@@ -338,64 +338,69 @@ router.delete('/:id/load', authenticateToken, async (req, res) => {
 
 // Create new block
 router.post('/', authenticateToken, async (req, res) => {
-  const client = await pool.connect();
   try {
-    await client.query('BEGIN');
-    
     const { name, description, isPublic = true } = req.body;
 
     if (!name) {
       return res.status(400).json({ error: 'Block name is required' });
     }
 
-    // Create the block
-    const result = await client.query(
+    console.log('🔧 Creating block:', { name, description, isPublic, userId: req.user.id });
+
+    // Create the block first
+    const result = await pool.query(
       'INSERT INTO blocks (name, description, creator_id, is_public) VALUES ($1, $2, $3, $4) RETURNING *',
       [name, description, req.user.id, isPublic]
     );
 
     const newBlock = result.rows[0];
-    const blockId = newBlock.id;
+    console.log('✅ Block created:', newBlock.id);
 
-    // AUTOMATICALLY ADD TO USER'S LOADED BLOCKS (as per specification)
-    console.log('🔄 Auto-loading created block to user loaded_blocks');
-    
-    // Get current loaded blocks
-    const userResult = await client.query(
-      'SELECT loaded_blocks FROM user_profiles WHERE user_id = $1',
-      [req.user.id]
-    );
-    
-    let loadedBlocks = userResult.rows[0]?.loaded_blocks || [];
-    
-    // Add the new block if not already loaded
-    if (!loadedBlocks.includes(blockId)) {
-      loadedBlocks.push(blockId);
+    // Try to auto-load the block (non-critical - if it fails, still return success)
+    try {
+      const blockId = newBlock.id;
       
-      // Update user profile with new loaded block
-      await client.query(`
-        INSERT INTO user_profiles (user_id, loaded_blocks) 
-        VALUES ($1, $2) 
-        ON CONFLICT (user_id) 
-        DO UPDATE SET loaded_blocks = $2, updated_at = CURRENT_TIMESTAMP
-      `, [req.user.id, loadedBlocks]);
+      // Get current loaded blocks
+      const userResult = await pool.query(
+        'SELECT loaded_blocks FROM user_profiles WHERE user_id = $1',
+        [req.user.id]
+      );
       
-      console.log('✅ Block automatically loaded for creator');
+      let loadedBlocks = userResult.rows[0]?.loaded_blocks || [];
+      console.log('📋 Current loaded blocks:', loadedBlocks);
+      
+      // Add the new block if not already loaded
+      if (!loadedBlocks.includes(blockId)) {
+        loadedBlocks.push(blockId);
+        
+        // Update user profile with new loaded block
+        await pool.query(`
+          INSERT INTO user_profiles (user_id, loaded_blocks) 
+          VALUES ($1, $2::jsonb) 
+          ON CONFLICT (user_id) 
+          DO UPDATE SET loaded_blocks = $2::jsonb, updated_at = CURRENT_TIMESTAMP
+        `, [req.user.id, JSON.stringify(loadedBlocks)]);
+        
+        console.log('✅ Block automatically loaded for creator');
+      }
+    } catch (autoLoadError) {
+      console.warn('⚠️ Auto-load failed (non-critical):', autoLoadError.message);
+      // Don't fail the whole request if auto-load fails
     }
 
-    await client.query('COMMIT');
-
     res.status(201).json({
-      message: 'Block created successfully and automatically loaded',
-      block: newBlock,
-      autoLoaded: true
+      message: 'Block created successfully',
+      block: newBlock
     });
+    
   } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('Error creating block:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  } finally {
-    client.release();
+    console.error('❌ Error creating block:', error);
+    console.error('❌ Error details:', error.message);
+    console.error('❌ Error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message 
+    });
   }
 });
 
