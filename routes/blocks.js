@@ -7,16 +7,21 @@ const router = express.Router();
 // Get all blocks with questions (temporary - will be 'loaded blocks' after migration)
 router.get('/', authenticateToken, async (req, res) => {
   try {
+    console.log('🔍 /blocks endpoint called for user:', req.user.id);
+    
     const blocksResult = await pool.query(`
-      SELECT b.*, u.nickname as creator_nickname,
+      SELECT b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at,
+        u.nickname as creator_nickname,
         COUNT(q.id) as question_count
       FROM blocks b
       LEFT JOIN users u ON b.creator_id = u.id
       LEFT JOIN questions q ON b.id = q.block_id
       WHERE b.is_public = true OR b.creator_id = $1
-      GROUP BY b.id, u.nickname
+      GROUP BY b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at, u.nickname
       ORDER BY b.created_at DESC
     `, [req.user.id]);
+    
+    console.log('🔍 Found blocks:', blocksResult.rows.length);
 
     const blocks = [];
     
@@ -65,10 +70,17 @@ router.get('/', authenticateToken, async (req, res) => {
       });
     }
 
+    console.log('🔍 Returning', blocks.length, 'total blocks');
     res.json(blocks);
   } catch (error) {
-    console.error('Error fetching blocks:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('❌ Error fetching blocks:', error);
+    console.error('❌ Error details:', error.message);
+    console.error('❌ Error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message,
+      endpoint: '/blocks'
+    });
   }
 });
 
