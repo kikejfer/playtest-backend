@@ -52,7 +52,7 @@ router.get('/history', authenticateToken, async (req, res) => {
         g.config,
         g.created_at,
         gs.score_data,
-        b.short_name as block_name,
+        b.name as block_name,
         gp.nickname
       FROM games g
       JOIN game_players gp ON g.id = gp.game_id
