@@ -23,7 +23,7 @@ router.get('/', authenticateToken, async (req, res) => {
     for (const block of blocksResult.rows) {
       // Get questions for this block
       const questionsResult = await pool.query(`
-        SELECT q.*, 
+        SELECT q.id, q.text_question, q.topic, q.block_id, q.difficulty, q.explanation,
           json_agg(
             json_build_object(
               'id', a.id,
@@ -34,7 +34,7 @@ router.get('/', authenticateToken, async (req, res) => {
         FROM questions q
         LEFT JOIN answers a ON q.id = a.question_id
         WHERE q.block_id = $1
-        GROUP BY q.id
+        GROUP BY q.id, q.text_question, q.topic, q.block_id, q.difficulty, q.explanation
         ORDER BY q.created_at
       `, [block.id]);
 
@@ -44,6 +44,7 @@ router.get('/', authenticateToken, async (req, res) => {
         tema: q.topic,
         bloqueId: q.block_id,
         difficulty: q.difficulty,
+        explicacionRespuesta: q.explanation || null,
         respuestas: q.answers.filter(a => a.id !== null).map(a => ({
           textoRespuesta: a.answerText,
           esCorrecta: a.isCorrect
@@ -53,6 +54,8 @@ router.get('/', authenticateToken, async (req, res) => {
       blocks.push({
         id: block.id,
         name: block.name,
+        nombreCorto: block.name, // For frontend compatibility
+        nombreLargo: block.description || block.name,
         description: block.description,
         creatorId: block.creator_id,
         creatorNickname: block.creator_nickname,
