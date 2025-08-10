@@ -173,6 +173,106 @@ router.get('/available', authenticateToken, async (req, res) => {
   }
 });
 
+// Get loaded blocks (blocks that the user has loaded for gaming)
+router.get('/loaded', authenticateToken, async (req, res) => {
+  try {
+    console.log('🔍 /blocks/loaded endpoint called');
+    console.log('🔍 User ID:', req.user.id);
+    
+    // Get user profile to see which blocks are loaded
+    const userResult = await pool.query(
+      'SELECT loaded_blocks FROM user_profiles WHERE user_id = $1',
+      [req.user.id]
+    );
+    
+    const loadedBlockIds = userResult.rows[0]?.loaded_blocks || [];
+    console.log('🔍 Loaded block IDs:', loadedBlockIds);
+    
+    if (loadedBlockIds.length === 0) {
+      return res.json([]);
+    }
+    
+    // Get the actual blocks that are loaded
+    const placeholders = loadedBlockIds.map((_, index) => `$${index + 2}`).join(',');
+    const blocksResult = await pool.query(`
+      SELECT b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at,
+        u.nickname as creator_nickname,
+        COUNT(q.id) as question_count
+      FROM blocks b
+      LEFT JOIN users u ON b.creator_id = u.id
+      LEFT JOIN questions q ON b.id = q.block_id
+      WHERE b.id = ANY($1)
+      GROUP BY b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at, u.nickname
+      ORDER BY b.created_at DESC
+    `, [loadedBlockIds]);
+
+    console.log('🔍 Found loaded blocks:', blocksResult.rows.length);
+
+    const blocks = [];
+    
+    for (const block of blocksResult.rows) {
+      // Get questions for this block (simplified)
+      const questionsResult = await pool.query(`
+        SELECT q.id, q.text_question, q.topic, q.block_id, q.difficulty, q.explanation
+        FROM questions q
+        WHERE q.block_id = $1
+        ORDER BY q.created_at
+        LIMIT 50
+      `, [block.id]);
+
+      console.log(`🔍 Loaded block ${block.id} has ${questionsResult.rows.length} questions`);
+
+      // Get answers for questions (simplified)
+      const questions = [];
+      for (const q of questionsResult.rows) {
+        const answersResult = await pool.query(`
+          SELECT a.id, a.answer_text, a.is_correct
+          FROM answers a
+          WHERE a.question_id = $1
+        `, [q.id]);
+
+        questions.push({
+          id: q.id,
+          textoPregunta: q.text_question,
+          tema: q.topic,
+          bloqueId: q.block_id,
+          difficulty: q.difficulty,
+          explicacionRespuesta: q.explanation || null,
+          respuestas: answersResult.rows.map(a => ({
+            textoRespuesta: a.answer_text,
+            esCorrecta: a.is_correct
+          }))
+        });
+      }
+
+      blocks.push({
+        id: block.id,
+        name: block.name,
+        nombreCorto: block.name,
+        nombreLargo: block.description || block.name,
+        description: block.description,
+        creatorId: block.creator_id,
+        creatorNickname: block.creator_nickname || 'Unknown',
+        isPublic: block.is_public,
+        questionCount: parseInt(block.question_count) || 0,
+        questions: questions
+      });
+    }
+
+    console.log('🔍 Returning', blocks.length, 'loaded blocks');
+    res.json(blocks);
+  } catch (error) {
+    console.error('❌ Error fetching loaded blocks:', error);
+    console.error('❌ Error details:', error.message);
+    console.error('❌ Error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message,
+      endpoint: '/blocks/loaded'
+    });
+  }
+});
+
 // Get created blocks (blocks created by the current user)
 router.get('/created', authenticateToken, async (req, res) => {
   try {
