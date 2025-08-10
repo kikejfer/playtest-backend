@@ -258,4 +258,68 @@ router.post('/:id/scores', authenticateToken, async (req, res) => {
   }
 });
 
+// Get game history for user
+router.get('/history', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT DISTINCT
+        g.id as game_id,
+        g.game_type,
+        g.config,
+        g.created_at,
+        gs.score_data,
+        b.short_name as block_name,
+        gp.nickname
+      FROM games g
+      JOIN game_players gp ON g.id = gp.game_id
+      LEFT JOIN game_scores gs ON g.id = gs.game_id
+      LEFT JOIN blocks b ON CAST(b.id as TEXT) = ANY(SELECT jsonb_object_keys(g.config))
+      WHERE gp.user_id = $1 
+        AND g.status = 'completed'
+      ORDER BY g.created_at DESC
+      LIMIT 50
+    `, [req.user.id]);
+
+    const history = result.rows.map(row => {
+      const scoreData = row.score_data || {};
+      return {
+        gameId: row.game_id,
+        mode: getGameModeDisplay(row.game_type),
+        blockName: row.block_name || 'Unknown Block',
+        correct: scoreData.score || 0,
+        incorrect: Math.max(0, (scoreData.totalQuestions || 0) - (scoreData.score || 0)),
+        date: row.created_at,
+        score: calculateScore(scoreData.score || 0, scoreData.totalQuestions || 1)
+      };
+    });
+
+    res.json(history);
+  } catch (error) {
+    console.error('Error fetching game history:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Helper function to convert game type to display format
+function getGameModeDisplay(gameType) {
+  const typeToMode = {
+    'classic': 'Modo Clásico',
+    'time-trial': 'Modo Contrarreloj',
+    'lives': 'Modo Vidas',
+    'by-levels': 'Por Niveles',
+    'streak': 'Racha de Aciertos',
+    'exam': 'Examen Simulado',
+    'duel': 'Duelo',
+    'marathon': 'Maratón',
+    'trivial': 'Trivial'
+  };
+  return typeToMode[gameType] || gameType;
+}
+
+// Helper function to calculate score (0-10 scale)
+function calculateScore(correct, total) {
+  if (total === 0) return 0;
+  return Math.round((correct / total) * 10 * 100) / 100;
+}
+
 module.exports = router;
