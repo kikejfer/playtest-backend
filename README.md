@@ -84,4 +84,4 @@ Render configurará automáticamente:
 
 ## Estructura de Base de Datos
 
-Ver `database-schema.sql` para el esquema completo de la base de datos.
+Ver `database-schema.sql` para el esquema completo de la base de datos.# Force redeploy Sun, Aug 10, 2025 11:35:07 PM
