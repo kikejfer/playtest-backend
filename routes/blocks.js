@@ -75,49 +75,63 @@ router.get('/', authenticateToken, async (req, res) => {
 // Get available blocks (all public blocks from all users)
 router.get('/available', authenticateToken, async (req, res) => {
   try {
+    console.log('🔍 /blocks/available endpoint called');
+    console.log('🔍 User ID:', req.user.id);
+    
+    // Simple query first to test database connection
+    const testQuery = await pool.query('SELECT COUNT(*) as total FROM blocks WHERE is_public = true');
+    console.log('🔍 Total public blocks:', testQuery.rows[0]?.total || 0);
+    
     const blocksResult = await pool.query(`
-      SELECT b.*, u.nickname as creator_nickname,
+      SELECT b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at,
+        u.nickname as creator_nickname,
         COUNT(q.id) as question_count
       FROM blocks b
       LEFT JOIN users u ON b.creator_id = u.id
       LEFT JOIN questions q ON b.id = q.block_id
       WHERE b.is_public = true
-      GROUP BY b.id, u.nickname
+      GROUP BY b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at, u.nickname
       ORDER BY b.created_at DESC
     `);
+
+    console.log('🔍 Found blocks:', blocksResult.rows.length);
 
     const blocks = [];
     
     for (const block of blocksResult.rows) {
-      // Get questions for this block
+      // Get questions for this block (simplified)
       const questionsResult = await pool.query(`
-        SELECT q.id, q.text_question, q.topic, q.block_id, q.difficulty, q.explanation,
-          json_agg(
-            json_build_object(
-              'id', a.id,
-              'answerText', a.answer_text,
-              'isCorrect', a.is_correct
-            )
-          ) as answers
+        SELECT q.id, q.text_question, q.topic, q.block_id, q.difficulty, q.explanation
         FROM questions q
-        LEFT JOIN answers a ON q.id = a.question_id
         WHERE q.block_id = $1
-        GROUP BY q.id, q.text_question, q.topic, q.block_id, q.difficulty, q.explanation
         ORDER BY q.created_at
+        LIMIT 50
       `, [block.id]);
 
-      const questions = questionsResult.rows.map(q => ({
-        id: q.id,
-        textoPregunta: q.text_question,
-        tema: q.topic,
-        bloqueId: q.block_id,
-        difficulty: q.difficulty,
-        explicacionRespuesta: q.explanation || null,
-        respuestas: q.answers.filter(a => a.id !== null).map(a => ({
-          textoRespuesta: a.answerText,
-          esCorrecta: a.isCorrect
-        }))
-      }));
+      console.log(`🔍 Block ${block.id} has ${questionsResult.rows.length} questions`);
+
+      // Get answers for questions (simplified)
+      const questions = [];
+      for (const q of questionsResult.rows) {
+        const answersResult = await pool.query(`
+          SELECT a.id, a.answer_text, a.is_correct
+          FROM answers a
+          WHERE a.question_id = $1
+        `, [q.id]);
+
+        questions.push({
+          id: q.id,
+          textoPregunta: q.text_question,
+          tema: q.topic,
+          bloqueId: q.block_id,
+          difficulty: q.difficulty,
+          explicacionRespuesta: q.explanation || null,
+          respuestas: answersResult.rows.map(a => ({
+            textoRespuesta: a.answer_text,
+            esCorrecta: a.is_correct
+          }))
+        });
+      }
 
       blocks.push({
         id: block.id,
@@ -126,66 +140,87 @@ router.get('/available', authenticateToken, async (req, res) => {
         nombreLargo: block.description || block.name,
         description: block.description,
         creatorId: block.creator_id,
-        creatorNickname: block.creator_nickname,
+        creatorNickname: block.creator_nickname || 'Unknown',
         isPublic: block.is_public,
-        questionCount: parseInt(block.question_count),
+        questionCount: parseInt(block.question_count) || 0,
         questions: questions
       });
     }
 
+    console.log('🔍 Returning', blocks.length, 'blocks');
     res.json(blocks);
   } catch (error) {
-    console.error('Error fetching available blocks:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('❌ Error fetching available blocks:', error);
+    console.error('❌ Error details:', error.message);
+    console.error('❌ Error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message,
+      endpoint: '/blocks/available'
+    });
   }
 });
 
 // Get created blocks (blocks created by the current user)
 router.get('/created', authenticateToken, async (req, res) => {
   try {
+    console.log('🔍 /blocks/created endpoint called');
+    console.log('🔍 User ID:', req.user.id);
+    
+    // Simple query first to test database connection
+    const testQuery = await pool.query('SELECT COUNT(*) as total FROM blocks WHERE creator_id = $1', [req.user.id]);
+    console.log('🔍 Total created blocks for user:', testQuery.rows[0]?.total || 0);
+    
     const blocksResult = await pool.query(`
-      SELECT b.*, u.nickname as creator_nickname,
+      SELECT b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at,
+        u.nickname as creator_nickname,
         COUNT(q.id) as question_count
       FROM blocks b
       LEFT JOIN users u ON b.creator_id = u.id
       LEFT JOIN questions q ON b.id = q.block_id
       WHERE b.creator_id = $1
-      GROUP BY b.id, u.nickname
+      GROUP BY b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at, u.nickname
       ORDER BY b.created_at DESC
     `, [req.user.id]);
+
+    console.log('🔍 Found created blocks:', blocksResult.rows.length);
 
     const blocks = [];
     
     for (const block of blocksResult.rows) {
-      // Get questions for this block
+      // Get questions for this block (simplified)
       const questionsResult = await pool.query(`
-        SELECT q.id, q.text_question, q.topic, q.block_id, q.difficulty, q.explanation,
-          json_agg(
-            json_build_object(
-              'id', a.id,
-              'answerText', a.answer_text,
-              'isCorrect', a.is_correct
-            )
-          ) as answers
+        SELECT q.id, q.text_question, q.topic, q.block_id, q.difficulty, q.explanation
         FROM questions q
-        LEFT JOIN answers a ON q.id = a.question_id
         WHERE q.block_id = $1
-        GROUP BY q.id, q.text_question, q.topic, q.block_id, q.difficulty, q.explanation
         ORDER BY q.created_at
+        LIMIT 50
       `, [block.id]);
 
-      const questions = questionsResult.rows.map(q => ({
-        id: q.id,
-        textoPregunta: q.text_question,
-        tema: q.topic,
-        bloqueId: q.block_id,
-        difficulty: q.difficulty,
-        explicacionRespuesta: q.explanation || null,
-        respuestas: q.answers.filter(a => a.id !== null).map(a => ({
-          textoRespuesta: a.answerText,
-          esCorrecta: a.isCorrect
-        }))
-      }));
+      console.log(`🔍 Created block ${block.id} has ${questionsResult.rows.length} questions`);
+
+      // Get answers for questions (simplified)
+      const questions = [];
+      for (const q of questionsResult.rows) {
+        const answersResult = await pool.query(`
+          SELECT a.id, a.answer_text, a.is_correct
+          FROM answers a
+          WHERE a.question_id = $1
+        `, [q.id]);
+
+        questions.push({
+          id: q.id,
+          textoPregunta: q.text_question,
+          tema: q.topic,
+          bloqueId: q.block_id,
+          difficulty: q.difficulty,
+          explicacionRespuesta: q.explanation || null,
+          respuestas: answersResult.rows.map(a => ({
+            textoRespuesta: a.answer_text,
+            esCorrecta: a.is_correct
+          }))
+        });
+      }
 
       blocks.push({
         id: block.id,
@@ -194,17 +229,24 @@ router.get('/created', authenticateToken, async (req, res) => {
         nombreLargo: block.description || block.name,
         description: block.description,
         creatorId: block.creator_id,
-        creatorNickname: block.creator_nickname,
+        creatorNickname: block.creator_nickname || 'Unknown',
         isPublic: block.is_public,
-        questionCount: parseInt(block.question_count),
+        questionCount: parseInt(block.question_count) || 0,
         questions: questions
       });
     }
 
+    console.log('🔍 Returning', blocks.length, 'created blocks');
     res.json(blocks);
   } catch (error) {
-    console.error('Error fetching created blocks:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('❌ Error fetching created blocks:', error);
+    console.error('❌ Error details:', error.message);
+    console.error('❌ Error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message,
+      endpoint: '/blocks/created'
+    });
   }
 });
 
