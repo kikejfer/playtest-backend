@@ -385,7 +385,7 @@ router.post('/:id/load', authenticateToken, async (req, res) => {
     
     let loadedBlocks = userResult.rows[0]?.loaded_blocks || [];
     
-    // Add block if not already loaded
+    // Add block if not already loaded (ensure types match)
     if (!loadedBlocks.includes(blockId)) {
       loadedBlocks.push(blockId);
       
@@ -469,9 +469,10 @@ router.post('/', authenticateToken, async (req, res) => {
       let loadedBlocks = userResult.rows[0]?.loaded_blocks || [];
       console.log('📋 Current loaded blocks:', loadedBlocks);
       
-      // Add the new block if not already loaded
-      if (!loadedBlocks.includes(blockId)) {
-        loadedBlocks.push(blockId);
+      // Add the new block if not already loaded (ensure types match)
+      const blockIdInt = parseInt(blockId);
+      if (!loadedBlocks.includes(blockIdInt)) {
+        loadedBlocks.push(blockIdInt);
         
         // Update user profile with new loaded block
         await pool.query(`
