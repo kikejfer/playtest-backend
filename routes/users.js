@@ -87,7 +87,16 @@ router.post('/stats', authenticateToken, async (req, res) => {
 
     if (profileResult.rows.length > 0) {
       answerHistory = profileResult.rows[0].answer_history || [];
-      stats = profileResult.rows[0].stats || stats;
+      const dbStats = profileResult.rows[0].stats || {};
+      
+      // Ensure stats has the correct structure
+      stats = {
+        consolidation: {
+          byQuestion: dbStats.consolidation?.byQuestion || {},
+          byTopic: dbStats.consolidation?.byTopic || {},
+          byBlock: dbStats.consolidation?.byBlock || {}
+        }
+      };
     }
 
     // Add new answers to history
