@@ -14,7 +14,7 @@ const authenticateToken = async (req, res, next) => {
     
     // Verify user still exists and session is valid
     const result = await pool.query(
-      'SELECT u.id, u.nickname, u.is_admin FROM users u WHERE u.id = $1',
+      'SELECT u.id, u.nickname FROM users u WHERE u.id = $1',
       [decoded.userId]
     );
 
@@ -24,9 +24,7 @@ const authenticateToken = async (req, res, next) => {
 
     req.user = {
       id: decoded.userId,
-      userId: decoded.userId,
-      nickname: result.rows[0].nickname,
-      isAdmin: result.rows[0].is_admin || false
+      nickname: result.rows[0].nickname
     };
     
     next();

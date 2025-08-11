@@ -4,53 +4,6 @@ const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
 
-// Get all users (admin only)
-router.get('/', authenticateToken, async (req, res) => {
-  try {
-    // Check if user is admin
-    const userCheck = await pool.query(
-      'SELECT is_admin FROM users WHERE id = $1',
-      [req.user.userId]
-    );
-    
-    if (!userCheck.rows[0]?.is_admin) {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
-    
-    const result = await pool.query(`
-      SELECT u.id, u.nickname, u.email, u.created_at, u.is_admin,
-        up.loaded_blocks, up.stats,
-        COUNT(DISTINCT b.id) as created_blocks,
-        COUNT(DISTINCT q.id) as created_questions
-      FROM users u
-      LEFT JOIN user_profiles up ON u.id = up.user_id
-      LEFT JOIN blocks b ON u.id = b.creator_id
-      LEFT JOIN questions q ON b.id = q.block_id
-      GROUP BY u.id, u.nickname, u.email, u.created_at, u.is_admin, up.loaded_blocks, up.stats
-      ORDER BY u.created_at DESC
-    `);
-    
-    const users = result.rows.map(user => ({
-      id: user.id,
-      nickname: user.nickname,
-      email: user.email,
-      createdAt: user.created_at,
-      isAdmin: user.is_admin || false,
-      stats: {
-        loadedBlocks: Array.isArray(user.loaded_blocks) ? user.loaded_blocks.length : 0,
-        createdBlocks: parseInt(user.created_blocks) || 0,
-        createdQuestions: parseInt(user.created_questions) || 0,
-        activeGames: 0 // TODO: Calculate from games table when implemented
-      }
-    }));
-    
-    res.json(users);
-  } catch (error) {
-    console.error('Error fetching users:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
 // Get user profile
 router.get('/profile', authenticateToken, async (req, res) => {
   try {
