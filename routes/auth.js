@@ -31,7 +31,7 @@ router.post('/register', async (req, res) => {
 
     // Create user
     const result = await pool.query(
-      'INSERT INTO users (nickname, password_hash, email) VALUES ($1, $2, $3) RETURNING id, nickname, created_at',
+      'INSERT INTO users (nickname, password_hash, email, is_admin) VALUES ($1, $2, $3, false) RETURNING id, nickname, created_at, is_admin',
       [nickname, passwordHash, email]
     );
 
@@ -45,7 +45,7 @@ router.post('/register', async (req, res) => {
 
     // Generate JWT token
     const token = jwt.sign(
-      { userId: user.id, nickname: user.nickname },
+      { userId: user.id, nickname: user.nickname, isAdmin: user.is_admin || false },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -56,7 +56,8 @@ router.post('/register', async (req, res) => {
       user: {
         id: user.id,
         nickname: user.nickname,
-        createdAt: user.created_at
+        createdAt: user.created_at,
+        isAdmin: user.is_admin || false
       }
     });
 
@@ -77,7 +78,7 @@ router.post('/login', async (req, res) => {
 
     // Find user
     const result = await pool.query(
-      'SELECT id, nickname, password_hash FROM users WHERE nickname = $1',
+      'SELECT id, nickname, password_hash, is_admin FROM users WHERE nickname = $1',
       [nickname]
     );
 
@@ -96,7 +97,7 @@ router.post('/login', async (req, res) => {
 
     // Generate JWT token
     const token = jwt.sign(
-      { userId: user.id, nickname: user.nickname },
+      { userId: user.id, nickname: user.nickname, isAdmin: user.is_admin || false },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -106,7 +107,8 @@ router.post('/login', async (req, res) => {
       token,
       user: {
         id: user.id,
-        nickname: user.nickname
+        nickname: user.nickname,
+        isAdmin: user.is_admin || false
       }
     });
 
