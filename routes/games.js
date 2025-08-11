@@ -166,10 +166,10 @@ router.post('/', authenticateToken, async (req, res) => {
       });
     }
 
-    // Create game
+    // Create game with active status
     const gameResult = await client.query(
-      'INSERT INTO games (game_type, config, created_by) VALUES ($1, $2, $3) RETURNING id',
-      [gameType, config, req.user.id]
+      'INSERT INTO games (game_type, config, created_by, status) VALUES ($1, $2, $3, $4) RETURNING id',
+      [gameType, config, req.user.id, 'active']
     );
 
     const gameId = gameResult.rows[0].id;
