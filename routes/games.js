@@ -156,6 +156,106 @@ router.get('/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// Get game ranking/history for a specific game (for Time Trial, etc.)
+router.get('/:id/ranking', authenticateToken, async (req, res) => {
+  try {
+    const gameId = parseInt(req.params.id);
+    console.log('📊 Getting game ranking for game:', gameId, 'user:', req.user.id);
+
+    // Check if game exists and user has access
+    const gameResult = await pool.query(`
+      SELECT g.id, g.game_type, g.config, g.status,
+        json_agg(
+          json_build_object(
+            'userId', p.user_id,
+            'nickname', u.nickname
+          )
+        ) as players
+      FROM games g
+      LEFT JOIN game_players p ON g.id = p.game_id
+      LEFT JOIN users u ON p.user_id = u.id
+      WHERE g.id = $1
+      GROUP BY g.id, g.game_type, g.config, g.status
+    `, [gameId]);
+
+    if (gameResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Game not found' });
+    }
+
+    // Check if user is part of this game
+    const game = gameResult.rows[0];
+    const isPlayerInGame = game.players.some(
+      player => player.userId === req.user.id
+    );
+
+    if (!isPlayerInGame) {
+      return res.status(403).json({ error: 'Not authorized to access this game ranking' });
+    }
+
+    // Get user's answer history for this specific game configuration
+    const userResult = await pool.query(
+      'SELECT answer_history FROM user_profiles WHERE user_id = $1',
+      [req.user.id]
+    );
+
+    const answerHistory = userResult.rows[0]?.answer_history || [];
+    console.log('📊 Total answer history entries:', answerHistory.length);
+
+    // Filter answers for this specific game and calculate game sessions
+    const gameAnswers = answerHistory.filter(entry => entry.gameId === gameId);
+    console.log('📊 Game-specific history entries:', gameAnswers.length);
+
+    // Group by timestamp to identify game sessions (answers within same minute are same session)
+    const gameSessions = {};
+    gameAnswers.forEach(answer => {
+      // Round timestamp to minute to group session answers
+      const sessionKey = answer.timestamp.substring(0, 16); // "YYYY-MM-DDTHH:MM"
+      if (!gameSessions[sessionKey]) {
+        gameSessions[sessionKey] = [];
+      }
+      gameSessions[sessionKey].push(answer);
+    });
+
+    // Calculate stats for each session
+    const sessionStats = Object.entries(gameSessions).map(([sessionTime, answers]) => {
+      const correct = answers.filter(a => a.result === 'ACIERTO').length;
+      const incorrect = answers.filter(a => a.result === 'FALLO').length;
+      const blank = answers.filter(a => a.result === 'BLANCO' || a.result === 'BLANK').length;
+      const total = answers.length;
+      
+      return {
+        timestamp: sessionTime,
+        date: new Date(sessionTime).toISOString(),
+        correct,
+        incorrect,
+        blank,
+        total,
+        percentage: total > 0 ? Math.round((correct / total) * 100) : 0
+      };
+    });
+
+    // Sort by correct answers (desc) then by percentage (desc) then by date (desc)
+    const ranking = sessionStats
+      .sort((a, b) => {
+        if (b.correct !== a.correct) return b.correct - a.correct;
+        if (b.percentage !== a.percentage) return b.percentage - a.percentage;
+        return new Date(b.date) - new Date(a.date);
+      })
+      .slice(0, 10); // Top 10
+
+    console.log('📊 Returning ranking with', ranking.length, 'entries');
+    res.json(ranking);
+    
+  } catch (error) {
+    console.error('❌ Error fetching game ranking:', error);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message,
+      endpoint: '/games/:id/ranking'
+    });
+  }
+});
+
 // Create new game
 router.post('/', authenticateToken, async (req, res) => {
   const client = await pool.connect();
