@@ -53,7 +53,9 @@ router.get('/history', authenticateToken, async (req, res) => {
         g.created_at,
         gs.score_data,
         b.name as block_name,
-        gp.nickname
+        b.id as block_id,
+        gp.nickname,
+        (SELECT COUNT(*) FROM questions q WHERE q.block_id = b.id) as total_block_questions
       FROM games g
       JOIN game_players gp ON g.id = gp.game_id
       LEFT JOIN game_scores gs ON g.id = gs.game_id
@@ -68,15 +70,21 @@ router.get('/history', authenticateToken, async (req, res) => {
 
     const history = result.rows.map(row => {
       const scoreData = row.score_data || {};
-      console.log('🎮 Processing game:', row.game_id, 'status:', row.status, 'scoreData:', scoreData);
+      const totalBlockQuestions = parseInt(row.total_block_questions) || 1;
+      const correctAnswers = scoreData.score || 0;
+      
+      console.log('🎮 Processing game:', row.game_id, 'status:', row.status);
+      console.log('📊 ScoreData:', scoreData);
+      console.log('📊 Total questions in block:', totalBlockQuestions, 'Correct answers:', correctAnswers);
+      
       return {
         gameId: row.game_id,
         mode: getGameModeDisplay(row.game_type),
         blockName: row.block_name || 'Unknown Block',
-        correct: scoreData.score || 0,
-        incorrect: Math.max(0, (scoreData.totalQuestions || 0) - (scoreData.score || 0)),
+        correct: correctAnswers,
+        incorrect: Math.max(0, totalBlockQuestions - correctAnswers),
         date: row.created_at,
-        score: calculateScore(scoreData.score || 0, scoreData.totalQuestions || 1),
+        score: calculateScore(correctAnswers, totalBlockQuestions),
         status: row.status // Add status for debugging
       };
     });
