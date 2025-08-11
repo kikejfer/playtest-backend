@@ -584,7 +584,7 @@ router.get('/:id/history', authenticateToken, async (req, res) => {
     // Group by question and get last 20 results for each
     const questionHistory = {};
     
-    // Get all questions for this block first
+    // Get all questions for this block first with proper ordering
     const questionsResult = await pool.query(
       'SELECT id, text_question FROM questions WHERE block_id = $1 ORDER BY created_at',
       [blockId]
@@ -594,32 +594,46 @@ router.get('/:id/history', authenticateToken, async (req, res) => {
     console.log('📊 Questions in block:', questions.length);
 
     // Initialize each question with empty history
-    questions.forEach(question => {
+    questions.forEach((question, index) => {
       questionHistory[question.id] = {
+        id: question.id,
         questionId: question.id,
-        questionText: question.text_question,
-        results: []
+        numero: index + 1, // Sequential number starting from 1
+        textoPregunta: question.text_question,
+        results: new Array(20).fill(null) // Initialize with 20 nulls
       };
     });
 
     // Fill with actual results (last 20 per question)
-    blockHistory
-      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)) // Most recent first
-      .forEach(entry => {
-        if (questionHistory[entry.questionId] && questionHistory[entry.questionId].results.length < 20) {
-          questionHistory[entry.questionId].results.push({
-            result: entry.result, // 'ACIERTO' or 'FALLO'
-            timestamp: entry.timestamp,
-            responseTime: entry.responseTime
-          });
+    const sortedHistory = blockHistory.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)); // Oldest first
+    
+    sortedHistory.forEach(entry => {
+      if (questionHistory[entry.questionId]) {
+        const question = questionHistory[entry.questionId];
+        // Find the first null position and replace it
+        const firstNullIndex = question.results.findIndex(r => r === null);
+        if (firstNullIndex !== -1) {
+          // Convert database format to frontend format: A (green), F (red), B (blue)
+          let resultChar = 'B'; // Default to blank (blue)
+          if (entry.result === 'ACIERTO') resultChar = 'A';
+          else if (entry.result === 'FALLO') resultChar = 'F';
+          else if (entry.result === 'BLANCO' || entry.result === 'BLANK') resultChar = 'B';
+          
+          question.results[firstNullIndex] = resultChar;
+        } else {
+          // If array is full, shift left and add new result at the end
+          question.results.shift();
+          let resultChar = 'B'; // Default to blank (blue)
+          if (entry.result === 'ACIERTO') resultChar = 'A';
+          else if (entry.result === 'FALLO') resultChar = 'F';
+          else if (entry.result === 'BLANCO' || entry.result === 'BLANK') resultChar = 'B';
+          question.results.push(resultChar);
         }
-      });
+      }
+    });
 
     // Convert to array format
-    const historyArray = Object.values(questionHistory).map(q => ({
-      ...q,
-      results: q.results.reverse() // Show oldest first for chronological order
-    }));
+    const historyArray = Object.values(questionHistory).sort((a, b) => a.numero - b.numero);
 
     console.log('📊 Returning history for', historyArray.length, 'questions');
     res.json(historyArray);
