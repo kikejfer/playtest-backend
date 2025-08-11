@@ -72,17 +72,21 @@ router.get('/history', authenticateToken, async (req, res) => {
       const scoreData = row.score_data || {};
       const totalBlockQuestions = parseInt(row.total_block_questions) || 1;
       const correctAnswers = scoreData.score || 0;
+      const totalAnswered = scoreData.totalAnswered || correctAnswers; // Questions actually answered
+      const incorrectAnswers = Math.max(0, totalAnswered - correctAnswers); // Only count answered incorrect questions
+      const blankAnswers = Math.max(0, totalBlockQuestions - totalAnswered); // Unanswered questions
       
       console.log('🎮 Processing game:', row.game_id, 'status:', row.status);
       console.log('📊 ScoreData:', scoreData);
-      console.log('📊 Total questions in block:', totalBlockQuestions, 'Correct answers:', correctAnswers);
+      console.log('📊 Total questions:', totalBlockQuestions, 'Answered:', totalAnswered, 'Correct:', correctAnswers, 'Incorrect:', incorrectAnswers, 'Blank:', blankAnswers);
       
       return {
         gameId: row.game_id,
         mode: getGameModeDisplay(row.game_type),
         blockName: row.block_name || 'Unknown Block',
         correct: correctAnswers,
-        incorrect: Math.max(0, totalBlockQuestions - correctAnswers),
+        incorrect: incorrectAnswers,
+        blank: blankAnswers,
         date: row.created_at,
         score: calculateScore(correctAnswers, totalBlockQuestions),
         status: row.status // Add status for debugging
