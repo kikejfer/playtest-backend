@@ -405,12 +405,19 @@ router.post('/:id/scores', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Not authorized to save score for this game' });
     }
 
+    // Save the score
     await pool.query(
       'INSERT INTO game_scores (game_id, game_type, score_data) VALUES ($1, $2, $3)',
       [gameId, gameType, scoreData]
     );
 
-    res.status(201).json({ message: 'Score saved successfully' });
+    // Mark game as completed
+    await pool.query(
+      'UPDATE games SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+      ['completed', gameId]
+    );
+
+    res.status(201).json({ message: 'Score saved and game completed successfully' });
 
   } catch (error) {
     console.error('Error saving game score:', error);
@@ -462,51 +469,20 @@ router.get('/history/:userId', authenticateToken, async (req, res) => {
   try {
     const userId = parseInt(req.params.userId);
     
-    // Get completed games for the user with stats
+    // Get completed games for the user with stats from the generic game_scores table
     const result = await pool.query(`
-      SELECT DISTINCT ON (g.id)
+      SELECT 
         g.id as game_id,
         g.game_type,
         g.config,
         g.configuration_metadata,
         g.created_at,
-        
-        -- Get stats from different score tables
-        cs.correct as classic_correct,
-        cs.incorrect as classic_incorrect, 
-        cs.total as classic_total,
-        cs.score as classic_score,
-        
-        tts.correct as timetrial_correct,
-        tts.total_questions as timetrial_total,
-        tts.questions_answered as timetrial_answered,
-        
-        ms.score as marathon_score,
-        ms.total_questions as marathon_total,
-        
-        es.correct as exam_correct,
-        es.total_questions as exam_total,
-        es.score as exam_score,
-        
-        ss.max_streak,
-        
-        ls.correct as lives_correct,
-        ls.total_questions as lives_total,
-        
-        ds.winner as duel_winner,
-        ds.p1, ds.p2, ds.scores as duel_scores
-        
+        gs.score_data
       FROM games g
       JOIN game_players gp ON g.id = gp.game_id
-      LEFT JOIN classic_scores cs ON g.id = cs.game_id
-      LEFT JOIN time_trial_scores tts ON g.id = tts.game_id  
-      LEFT JOIN marathon_scores ms ON g.id = ms.game_id
-      LEFT JOIN exam_scores es ON g.id = es.game_id
-      LEFT JOIN streak_scores ss ON g.id = ss.game_id
-      LEFT JOIN lives_scores ls ON g.id = ls.game_id
-      LEFT JOIN duel_scores ds ON g.id = ds.game_id
+      LEFT JOIN game_scores gs ON g.id = gs.game_id
       WHERE gp.user_id = $1 AND g.status = 'completed'
-      ORDER BY g.id, g.created_at DESC
+      ORDER BY g.created_at DESC
       LIMIT 50
     `, [userId]);
 
@@ -529,56 +505,36 @@ router.get('/history/:userId', authenticateToken, async (req, res) => {
         }
       }
 
-      // Calculate stats based on game type
+      // Extract stats from score_data JSON
       let correct = 0, incorrect = 0, blank = 0, total = 0, score = null, opponent = null;
-
-      switch (row.game_type) {
-        case 'classic':
-          correct = row.classic_correct || 0;
-          incorrect = row.classic_incorrect || 0;
-          total = row.classic_total || 0;
+      
+      if (row.score_data) {
+        const scoreData = row.score_data;
+        
+        // Common fields across game types
+        correct = scoreData.correct || 0;
+        incorrect = scoreData.incorrect || 0;
+        total = scoreData.total || scoreData.totalQuestions || 0;
+        score = scoreData.score;
+        
+        // Calculate blank questions based on available data
+        if (scoreData.questionsAnswered !== undefined) {
+          // For time trial mode
+          blank = Math.max(0, total - scoreData.questionsAnswered);
+          incorrect = Math.max(0, scoreData.questionsAnswered - correct);
+        } else {
           blank = Math.max(0, total - correct - incorrect);
-          score = row.classic_score;
-          break;
-
-        case 'timetrial':
-          correct = row.timetrial_correct || 0;
-          total = row.timetrial_total || 0;
-          blank = Math.max(0, total - (row.timetrial_answered || 0));
-          incorrect = (row.timetrial_answered || 0) - correct;
-          break;
-
-        case 'marathon':
-          score = row.marathon_score || 0;
-          total = row.marathon_total || 0;
-          correct = Math.floor(score); // Approximate
-          break;
-
-        case 'exam':
-          correct = row.exam_correct || 0;
-          total = row.exam_total || 0;
-          score = row.exam_score;
-          blank = Math.max(0, total - correct);
-          break;
-
-        case 'lives':
-          correct = row.lives_correct || 0;
-          total = row.lives_total || 0;
-          incorrect = total - correct;
-          break;
-
-        case 'duel':
-          opponent = row.duel_winner === row.p1 ? row.p2 : row.p1;
-          if (row.duel_scores) {
-            correct = row.duel_scores.p1 || 0;
-            incorrect = row.duel_scores.p2 || 0;
-            total = correct + incorrect;
-          }
-          break;
-
-        case 'streak':
-          correct = row.max_streak || 0;
-          break;
+        }
+        
+        // Special handling for specific game types
+        if (row.game_type === 'duel' && scoreData.scores) {
+          opponent = scoreData.winner !== scoreData.p1 ? scoreData.p1 : scoreData.p2;
+        }
+        
+        if (row.game_type === 'streak') {
+          correct = scoreData.maxStreak || 0;
+          total = correct; // For streak, total is the streak achieved
+        }
       }
 
       return {
