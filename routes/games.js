@@ -469,15 +469,17 @@ router.get('/history/:userId', authenticateToken, async (req, res) => {
   try {
     const userId = parseInt(req.params.userId);
     
+    console.log(`Fetching game history for user ${userId}`);
+    
     // Get completed games for the user with stats from the generic game_scores table
     const result = await pool.query(`
       SELECT 
         g.id as game_id,
         g.game_type,
         g.config,
-        g.configuration_metadata,
+        COALESCE(g.configuration_metadata, '{}'::jsonb) as configuration_metadata,
         g.created_at,
-        gs.score_data
+        COALESCE(gs.score_data, '{}'::jsonb) as score_data
       FROM games g
       JOIN game_players gp ON g.id = gp.game_id
       LEFT JOIN game_scores gs ON g.id = gs.game_id
@@ -485,6 +487,8 @@ router.get('/history/:userId', authenticateToken, async (req, res) => {
       ORDER BY g.created_at DESC
       LIMIT 50
     `, [userId]);
+
+    console.log(`Found ${result.rows.length} completed games for user ${userId}`);
 
     const history = result.rows.map(row => {
       // Determine block name from config or metadata
@@ -551,10 +555,13 @@ router.get('/history/:userId', authenticateToken, async (req, res) => {
       };
     });
 
+    console.log(`Returning ${history.length} history entries`);
     res.json(history);
   } catch (error) {
     console.error('Error fetching game history:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Error details:', error.message);
+    console.error('Stack:', error.stack);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
