@@ -18,6 +18,15 @@ router.post('/', authenticateToken, async (req, res) => {
       question: textoPregunta.substring(0, 50) + '...'
     });
 
+    // CRITICAL: Validate that tema is preserved (topic separation protection)
+    if (!tema || tema.trim() === '' || tema === 'General') {
+      console.error('🚨 CRITICAL: Question received with invalid/missing tema:', { tema, blockId, question: textoPregunta.substring(0, 30) });
+      return res.status(400).json({ 
+        error: 'CRITICAL: Topic (tema) is required and cannot be empty or "General". Topic separation functionality compromised.',
+        receivedTema: tema
+      });
+    }
+
     if (!blockId || !textoPregunta || !respuestas || respuestas.length < 2) {
       return res.status(400).json({ 
         error: 'Block ID, question text, and at least 2 answers are required' 
