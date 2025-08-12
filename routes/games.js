@@ -497,11 +497,39 @@ router.get('/history/:userId', authenticateToken, async (req, res) => {
 
     const history = result.rows.map(row => {
       const scoreData = row.score_data || {};
-      const totalBlockQuestions = parseInt(row.total_block_questions) || 1;
+      const config = row.config || {};
       const correctAnswers = scoreData.score || 0;
       const totalAnswered = scoreData.totalAnswered || correctAnswers;
+      
+      // CRITICAL: Calculate questions based on game configuration, not total block questions
+      let configuredQuestions = parseInt(row.total_block_questions) || 1; // Default fallback
+      
+      try {
+        // If game has configuration with specific topics, calculate questions for those topics only
+        if (config && Object.keys(config).length > 0) {
+          let totalConfigQuestions = 0;
+          
+          // Iterate through each block in the configuration
+          for (const [blockId, blockConfig] of Object.entries(config)) {
+            if (blockConfig && blockConfig.topics && Array.isArray(blockConfig.topics)) {
+              // Count questions only for configured topics
+              totalConfigQuestions += blockConfig.topics.reduce((sum, topic) => {
+                return sum + (topic.questionCount || 0);
+              }, 0);
+            }
+          }
+          
+          if (totalConfigQuestions > 0) {
+            configuredQuestions = totalConfigQuestions;
+            console.log(`📊 Game ${row.game_id}: Using configured questions (${configuredQuestions}) instead of total block questions (${row.total_block_questions})`);
+          }
+        }
+      } catch (configError) {
+        console.warn(`⚠️ Error calculating configured questions for game ${row.game_id}, using block total:`, configError.message);
+      }
+      
       const incorrectAnswers = Math.max(0, totalAnswered - correctAnswers);
-      const blankAnswers = Math.max(0, totalBlockQuestions - totalAnswered);
+      const blankAnswers = Math.max(0, configuredQuestions - totalAnswered);
       
       return {
         gameId: row.game_id,
@@ -510,8 +538,8 @@ router.get('/history/:userId', authenticateToken, async (req, res) => {
         correct: correctAnswers,
         incorrect: incorrectAnswers,
         blank: blankAnswers,
-        total: totalBlockQuestions,
-        score: calculateScore(correctAnswers, totalBlockQuestions),
+        total: configuredQuestions, // Use configured questions instead of total block questions
+        score: calculateScore(correctAnswers, configuredQuestions), // CRITICAL: Score based on configured questions
         opponent: null, // Could be extended for multiplayer games
         date: row.created_at
       };
@@ -524,6 +552,127 @@ router.get('/history/:userId', authenticateToken, async (req, res) => {
     console.error('Error details:', error.message);
     console.error('Stack:', error.stack);
     res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+});
+
+// Save game configuration for future reference (Active Games functionality)
+router.post('/configurations', authenticateToken, async (req, res) => {
+  try {
+    const { gameType, config, configurationMetadata } = req.body;
+    
+    console.log('💾 Saving game configuration for user:', req.user.id);
+    
+    // Save configuration to user profile for easy access
+    const result = await pool.query(`
+      INSERT INTO user_game_configurations (user_id, game_type, config, metadata, created_at)
+      VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+      ON CONFLICT (user_id, game_type, config) 
+      DO UPDATE SET 
+        metadata = EXCLUDED.metadata,
+        last_used = CURRENT_TIMESTAMP,
+        use_count = COALESCE(user_game_configurations.use_count, 0) + 1
+      RETURNING id
+    `, [req.user.id, gameType, JSON.stringify(config), JSON.stringify(configurationMetadata)]);
+    
+    res.status(201).json({ 
+      message: 'Game configuration saved successfully',
+      configId: result.rows[0]?.id 
+    });
+  } catch (error) {
+    // If table doesn't exist, create it
+    if (error.code === '42P01') {
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS user_game_configurations (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            game_type VARCHAR(50) NOT NULL,
+            config JSONB NOT NULL,
+            metadata JSONB,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            use_count INTEGER DEFAULT 1,
+            UNIQUE(user_id, game_type, config)
+          )
+        `);
+        
+        // Retry the insert
+        const result = await pool.query(`
+          INSERT INTO user_game_configurations (user_id, game_type, config, metadata, created_at)
+          VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+          RETURNING id
+        `, [req.user.id, gameType, JSON.stringify(config), JSON.stringify(configurationMetadata)]);
+        
+        res.status(201).json({ 
+          message: 'Game configuration saved successfully (table created)',
+          configId: result.rows[0]?.id 
+        });
+      } catch (createError) {
+        console.error('Error creating configurations table:', createError);
+        res.status(500).json({ error: 'Failed to save configuration' });
+      }
+    } else {
+      console.error('Error saving game configuration:', error);
+      res.status(500).json({ error: 'Failed to save configuration' });
+    }
+  }
+});
+
+// Get saved game configurations for user (Active Games panel)
+router.get('/configurations', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, game_type, config, metadata, created_at, last_used, use_count
+      FROM user_game_configurations 
+      WHERE user_id = $1 
+      ORDER BY last_used DESC, use_count DESC
+      LIMIT 20
+    `, [req.user.id]);
+    
+    const configurations = result.rows.map(row => ({
+      id: row.id,
+      gameType: row.game_type,
+      gameMode: getGameModeDisplay(row.game_type),
+      config: row.config,
+      metadata: row.metadata,
+      createdAt: row.created_at,
+      lastUsed: row.last_used,
+      useCount: row.use_count || 1
+    }));
+    
+    console.log(`📋 Returning ${configurations.length} saved configurations for user ${req.user.id}`);
+    res.json(configurations);
+  } catch (error) {
+    if (error.code === '42P01') {
+      // Table doesn't exist yet, return empty array
+      console.log('💡 Configurations table does not exist yet, returning empty array');
+      res.json([]);
+    } else {
+      console.error('Error fetching game configurations:', error);
+      res.status(500).json({ error: 'Failed to fetch configurations' });
+    }
+  }
+});
+
+// Delete a saved game configuration
+router.delete('/configurations/:id', authenticateToken, async (req, res) => {
+  try {
+    const configId = parseInt(req.params.id);
+    
+    const result = await pool.query(`
+      DELETE FROM user_game_configurations 
+      WHERE id = $1 AND user_id = $2
+      RETURNING id
+    `, [configId, req.user.id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Configuration not found' });
+    }
+    
+    res.json({ message: 'Configuration deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting game configuration:', error);
+    res.status(500).json({ error: 'Failed to delete configuration' });
   }
 });
 
