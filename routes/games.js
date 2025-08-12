@@ -471,86 +471,32 @@ router.get('/history/:userId', authenticateToken, async (req, res) => {
     
     console.log(`Fetching game history for user ${userId}`);
     
-    // Get completed games for the user with stats from the generic game_scores table
+    // Start with simple query first
     const result = await pool.query(`
       SELECT 
         g.id as game_id,
         g.game_type,
-        g.config,
-        COALESCE(g.configuration_metadata, '{}'::jsonb) as configuration_metadata,
-        g.created_at,
-        COALESCE(gs.score_data, '{}'::jsonb) as score_data
+        g.created_at
       FROM games g
       JOIN game_players gp ON g.id = gp.game_id
-      LEFT JOIN game_scores gs ON g.id = gs.game_id
-      WHERE gp.user_id = $1 AND g.status = 'completed'
+      WHERE gp.user_id = $1
       ORDER BY g.created_at DESC
-      LIMIT 50
+      LIMIT 10
     `, [userId]);
 
-    console.log(`Found ${result.rows.length} completed games for user ${userId}`);
+    console.log(`Found ${result.rows.length} games for user ${userId}`);
 
     const history = result.rows.map(row => {
-      // Determine block name from config or metadata
-      let blockName = 'Multiple Blocks';
-      if (row.configuration_metadata && row.configuration_metadata.blocks) {
-        const blocks = row.configuration_metadata.blocks;
-        if (blocks.length === 1) {
-          blockName = blocks[0].blockName;
-        } else if (blocks.length > 1) {
-          blockName = `${blocks.length} blocks`;
-        }
-      } else if (row.config) {
-        const configEntries = Object.keys(row.config);
-        if (configEntries.length === 1) {
-          blockName = `Block ${configEntries[0]}`;
-        } else {
-          blockName = `${configEntries.length} blocks`;
-        }
-      }
-
-      // Extract stats from score_data JSON
-      let correct = 0, incorrect = 0, blank = 0, total = 0, score = null, opponent = null;
-      
-      if (row.score_data) {
-        const scoreData = row.score_data;
-        
-        // Common fields across game types
-        correct = scoreData.correct || 0;
-        incorrect = scoreData.incorrect || 0;
-        total = scoreData.total || scoreData.totalQuestions || 0;
-        score = scoreData.score;
-        
-        // Calculate blank questions based on available data
-        if (scoreData.questionsAnswered !== undefined) {
-          // For time trial mode
-          blank = Math.max(0, total - scoreData.questionsAnswered);
-          incorrect = Math.max(0, scoreData.questionsAnswered - correct);
-        } else {
-          blank = Math.max(0, total - correct - incorrect);
-        }
-        
-        // Special handling for specific game types
-        if (row.game_type === 'duel' && scoreData.scores) {
-          opponent = scoreData.winner !== scoreData.p1 ? scoreData.p1 : scoreData.p2;
-        }
-        
-        if (row.game_type === 'streak') {
-          correct = scoreData.maxStreak || 0;
-          total = correct; // For streak, total is the streak achieved
-        }
-      }
-
       return {
         gameId: row.game_id,
-        blockName: blockName,
-        mode: getGameModeInSpanish(row.game_type),
-        correct: correct,
-        incorrect: incorrect,
-        blank: blank,
-        total: total,
-        score: score,
-        opponent: opponent,
+        blockName: 'Test Block',
+        mode: getGameModeDisplay(row.game_type),
+        correct: 0,
+        incorrect: 0,
+        blank: 0,
+        total: 0,
+        score: null,
+        opponent: null,
         date: row.created_at
       };
     });
@@ -562,6 +508,39 @@ router.get('/history/:userId', authenticateToken, async (req, res) => {
     console.error('Error details:', error.message);
     console.error('Stack:', error.stack);
     res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+});
+
+// Debug route to check table structure
+router.get('/debug/tables', authenticateToken, async (req, res) => {
+  try {
+    // Check games table structure
+    const gamesStructure = await pool.query(`
+      SELECT column_name, data_type 
+      FROM information_schema.columns 
+      WHERE table_name = 'games'
+    `);
+    
+    // Check game_scores table structure  
+    const scoresStructure = await pool.query(`
+      SELECT column_name, data_type 
+      FROM information_schema.columns 
+      WHERE table_name = 'game_scores'
+    `);
+    
+    // Check if tables exist and have data
+    const gamesCount = await pool.query('SELECT COUNT(*) FROM games');
+    const scoresCount = await pool.query('SELECT COUNT(*) FROM game_scores');
+    
+    res.json({
+      games_structure: gamesStructure.rows,
+      scores_structure: scoresStructure.rows,
+      games_count: gamesCount.rows[0].count,
+      scores_count: scoresCount.rows[0].count
+    });
+  } catch (error) {
+    console.error('Debug error:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
