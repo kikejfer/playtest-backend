@@ -441,4 +441,165 @@ function calculateScore(correct, total) {
   return Math.round((correct / total) * 10 * 100) / 100;
 }
 
+// Get challenges for a specific user
+router.get('/challenges/:userId', authenticateToken, async (req, res) => {
+  try {
+    const userId = parseInt(req.params.userId);
+    
+    // For now, return empty array as challenges are not fully implemented
+    // In the future, this could query a challenges table
+    const challenges = [];
+    
+    res.json(challenges);
+  } catch (error) {
+    console.error('Error fetching challenges:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get game history for a specific user
+router.get('/history/:userId', authenticateToken, async (req, res) => {
+  try {
+    const userId = parseInt(req.params.userId);
+    
+    // Get completed games for the user with stats
+    const result = await pool.query(`
+      SELECT DISTINCT ON (g.id)
+        g.id as game_id,
+        g.game_type,
+        g.config,
+        g.configuration_metadata,
+        g.created_at,
+        
+        -- Get stats from different score tables
+        cs.correct as classic_correct,
+        cs.incorrect as classic_incorrect, 
+        cs.total as classic_total,
+        cs.score as classic_score,
+        
+        tts.correct as timetrial_correct,
+        tts.total_questions as timetrial_total,
+        tts.questions_answered as timetrial_answered,
+        
+        ms.score as marathon_score,
+        ms.total_questions as marathon_total,
+        
+        es.correct as exam_correct,
+        es.total_questions as exam_total,
+        es.score as exam_score,
+        
+        ss.max_streak,
+        
+        ls.correct as lives_correct,
+        ls.total_questions as lives_total,
+        
+        ds.winner as duel_winner,
+        ds.p1, ds.p2, ds.scores as duel_scores
+        
+      FROM games g
+      JOIN game_players gp ON g.id = gp.game_id
+      LEFT JOIN classic_scores cs ON g.id = cs.game_id
+      LEFT JOIN time_trial_scores tts ON g.id = tts.game_id  
+      LEFT JOIN marathon_scores ms ON g.id = ms.game_id
+      LEFT JOIN exam_scores es ON g.id = es.game_id
+      LEFT JOIN streak_scores ss ON g.id = ss.game_id
+      LEFT JOIN lives_scores ls ON g.id = ls.game_id
+      LEFT JOIN duel_scores ds ON g.id = ds.game_id
+      WHERE gp.user_id = $1 AND g.status = 'completed'
+      ORDER BY g.id, g.created_at DESC
+      LIMIT 50
+    `, [userId]);
+
+    const history = result.rows.map(row => {
+      // Determine block name from config or metadata
+      let blockName = 'Multiple Blocks';
+      if (row.configuration_metadata && row.configuration_metadata.blocks) {
+        const blocks = row.configuration_metadata.blocks;
+        if (blocks.length === 1) {
+          blockName = blocks[0].blockName;
+        } else if (blocks.length > 1) {
+          blockName = `${blocks.length} blocks`;
+        }
+      } else if (row.config) {
+        const configEntries = Object.keys(row.config);
+        if (configEntries.length === 1) {
+          blockName = `Block ${configEntries[0]}`;
+        } else {
+          blockName = `${configEntries.length} blocks`;
+        }
+      }
+
+      // Calculate stats based on game type
+      let correct = 0, incorrect = 0, blank = 0, total = 0, score = null, opponent = null;
+
+      switch (row.game_type) {
+        case 'classic':
+          correct = row.classic_correct || 0;
+          incorrect = row.classic_incorrect || 0;
+          total = row.classic_total || 0;
+          blank = Math.max(0, total - correct - incorrect);
+          score = row.classic_score;
+          break;
+
+        case 'timetrial':
+          correct = row.timetrial_correct || 0;
+          total = row.timetrial_total || 0;
+          blank = Math.max(0, total - (row.timetrial_answered || 0));
+          incorrect = (row.timetrial_answered || 0) - correct;
+          break;
+
+        case 'marathon':
+          score = row.marathon_score || 0;
+          total = row.marathon_total || 0;
+          correct = Math.floor(score); // Approximate
+          break;
+
+        case 'exam':
+          correct = row.exam_correct || 0;
+          total = row.exam_total || 0;
+          score = row.exam_score;
+          blank = Math.max(0, total - correct);
+          break;
+
+        case 'lives':
+          correct = row.lives_correct || 0;
+          total = row.lives_total || 0;
+          incorrect = total - correct;
+          break;
+
+        case 'duel':
+          opponent = row.duel_winner === row.p1 ? row.p2 : row.p1;
+          if (row.duel_scores) {
+            correct = row.duel_scores.p1 || 0;
+            incorrect = row.duel_scores.p2 || 0;
+            total = correct + incorrect;
+          }
+          break;
+
+        case 'streak':
+          correct = row.max_streak || 0;
+          break;
+      }
+
+      return {
+        gameId: row.game_id,
+        blockName: blockName,
+        mode: getGameModeInSpanish(row.game_type),
+        correct: correct,
+        incorrect: incorrect,
+        blank: blank,
+        total: total,
+        score: score,
+        opponent: opponent,
+        date: row.created_at
+      };
+    });
+
+    res.json(history);
+  } catch (error) {
+    console.error('Error fetching game history:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 module.exports = router;
