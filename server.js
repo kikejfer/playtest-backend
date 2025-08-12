@@ -15,12 +15,19 @@ app.set('trust proxy', 1);
 app.use(helmet());
 app.use(compression());
 
-// Rate limiting
-const limiter = rateLimit({
+// Rate limiting - more generous for question uploads
+const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 500 // limit each IP to 500 requests per windowMs (increased for bulk uploads)
+  max: 1000 // limit each IP to 1000 requests per windowMs (increased for bulk uploads)
 });
-app.use('/api', limiter);
+
+const questionLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  max: 200 // Allow more question uploads in shorter window
+});
+
+app.use('/api', generalLimiter);
+app.use('/api/questions', questionLimiter);
 
 // CORS configuration
 app.use(cors({
@@ -30,7 +37,11 @@ app.use(cors({
     'http://localhost:58500',
     'https://playtest-frontend.onrender.com'
   ],
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+  preflightContinue: false,
+  optionsSuccessStatus: 200
 }));
 
 // Body parsing middleware

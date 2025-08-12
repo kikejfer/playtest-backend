@@ -10,7 +10,7 @@ router.post('/', authenticateToken, async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    const { blockId, textoPregunta, tema, respuestas, difficulty = 1 } = req.body;
+    const { blockId, textoPregunta, tema, respuestas, difficulty = 1, explicacionRespuesta } = req.body;
 
     console.log(`📝 Backend received question:`, {
       blockId,
@@ -40,8 +40,8 @@ router.post('/', authenticateToken, async (req, res) => {
 
     // Create question
     const questionResult = await client.query(
-      'INSERT INTO questions (block_id, text_question, topic, difficulty) VALUES ($1, $2, $3, $4) RETURNING id',
-      [blockId, textoPregunta, tema, difficulty]
+      'INSERT INTO questions (block_id, text_question, topic, difficulty, explanation) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+      [blockId, textoPregunta, tema, difficulty, explicacionRespuesta]
     );
 
     const questionId = questionResult.rows[0].id;
