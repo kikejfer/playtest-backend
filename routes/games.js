@@ -471,32 +471,48 @@ router.get('/history/:userId', authenticateToken, async (req, res) => {
     
     console.log(`Fetching game history for user ${userId}`);
     
-    // Start with simple query first
+    // Get complete game history with scores and block information
     const result = await pool.query(`
-      SELECT 
+      SELECT DISTINCT
         g.id as game_id,
         g.game_type,
-        g.created_at
+        g.status,
+        g.config,
+        g.created_at,
+        gs.score_data,
+        b.name as block_name,
+        b.id as block_id,
+        gp.nickname,
+        (SELECT COUNT(*) FROM questions q WHERE q.block_id = b.id) as total_block_questions
       FROM games g
       JOIN game_players gp ON g.id = gp.game_id
-      WHERE gp.user_id = $1
+      LEFT JOIN game_scores gs ON g.id = gs.game_id
+      LEFT JOIN blocks b ON CAST(b.id as TEXT) = ANY(SELECT jsonb_object_keys(g.config))
+      WHERE gp.user_id = $1 AND g.status = 'completed'
       ORDER BY g.created_at DESC
       LIMIT 10
     `, [userId]);
 
-    console.log(`Found ${result.rows.length} games for user ${userId}`);
+    console.log(`Found ${result.rows.length} completed games for user ${userId}`);
 
     const history = result.rows.map(row => {
+      const scoreData = row.score_data || {};
+      const totalBlockQuestions = parseInt(row.total_block_questions) || 1;
+      const correctAnswers = scoreData.score || 0;
+      const totalAnswered = scoreData.totalAnswered || correctAnswers;
+      const incorrectAnswers = Math.max(0, totalAnswered - correctAnswers);
+      const blankAnswers = Math.max(0, totalBlockQuestions - totalAnswered);
+      
       return {
         gameId: row.game_id,
-        blockName: 'Test Block',
+        blockName: row.block_name || 'Unknown Block',
         mode: getGameModeDisplay(row.game_type),
-        correct: 0,
-        incorrect: 0,
-        blank: 0,
-        total: 0,
-        score: null,
-        opponent: null,
+        correct: correctAnswers,
+        incorrect: incorrectAnswers,
+        blank: blankAnswers,
+        total: totalBlockQuestions,
+        score: calculateScore(correctAnswers, totalBlockQuestions),
+        opponent: null, // Could be extended for multiplayer games
         date: row.created_at
       };
     });
