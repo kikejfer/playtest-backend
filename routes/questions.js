@@ -12,6 +12,12 @@ router.post('/', authenticateToken, async (req, res) => {
 
     const { blockId, textoPregunta, tema, respuestas, difficulty = 1 } = req.body;
 
+    console.log(`📝 Backend received question:`, {
+      blockId,
+      tema,
+      question: textoPregunta.substring(0, 50) + '...'
+    });
+
     if (!blockId || !textoPregunta || !respuestas || respuestas.length < 2) {
       return res.status(400).json({ 
         error: 'Block ID, question text, and at least 2 answers are required' 
