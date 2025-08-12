@@ -118,7 +118,7 @@ router.post('/stats', authenticateToken, async (req, res) => {
     // Keep only last 1000 answers
     answerHistory = answerHistory.slice(0, 1000);
 
-    // Calculate consolidation stats
+    // Calculate consolidation stats with improved algorithm
     const blockIds = [...new Set(gameResults.answers.map(a => a.blockId).filter(Boolean))];
     
     for (const blockId of blockIds) {
@@ -131,14 +131,24 @@ router.post('/stats', authenticateToken, async (req, res) => {
       const questionsInBlock = questionsResult.rows;
       if (questionsInBlock.length === 0) continue;
 
-      // Calculate block consolidation
-      const correctlyAnsweredIds = new Set(
-        answerHistory
-          .filter(h => h.blockId === blockId && h.result === 'ACIERTO')
-          .map(h => h.questionId)
-      );
+      // Calculate block consolidation with weighted scoring
+      let totalBlockConsolidation = 0;
       
-      const blockConsolidation = (correctlyAnsweredIds.size / questionsInBlock.length) * 100;
+      for (const question of questionsInBlock) {
+        const questionAnswers = answerHistory.filter(h => 
+          h.blockId === blockId && h.questionId === question.id
+        ).slice(0, 10); // Consider last 10 attempts
+        
+        if (questionAnswers.length === 0) {
+          // Question never attempted = 0% consolidation
+          totalBlockConsolidation += 0;
+        } else {
+          const consolidation = calculateQuestionConsolidation(questionAnswers);
+          totalBlockConsolidation += consolidation;
+        }
+      }
+      
+      const blockConsolidation = (totalBlockConsolidation / questionsInBlock.length);
       stats.consolidation.byBlock[blockId] = blockConsolidation;
 
       // Calculate topic consolidation
@@ -148,13 +158,22 @@ router.post('/stats', authenticateToken, async (req, res) => {
         const questionsInTopic = questionsInBlock.filter(q => q.topic === topicName);
         if (questionsInTopic.length === 0) continue;
 
-        const correctlyAnsweredInTopic = new Set(
-          answerHistory
-            .filter(h => h.blockId === blockId && h.topicName === topicName && h.result === 'ACIERTO')
-            .map(h => h.questionId)
-        );
+        let totalTopicConsolidation = 0;
+        
+        for (const question of questionsInTopic) {
+          const questionAnswers = answerHistory.filter(h => 
+            h.blockId === blockId && h.questionId === question.id && h.topicName === topicName
+          ).slice(0, 10); // Consider last 10 attempts
+          
+          if (questionAnswers.length === 0) {
+            totalTopicConsolidation += 0;
+          } else {
+            const consolidation = calculateQuestionConsolidation(questionAnswers);
+            totalTopicConsolidation += consolidation;
+          }
+        }
 
-        const topicConsolidation = (correctlyAnsweredInTopic.size / questionsInTopic.length) * 100;
+        const topicConsolidation = (totalTopicConsolidation / questionsInTopic.length);
         const topicKey = `${blockId}_${topicName}`;
         stats.consolidation.byTopic[topicKey] = topicConsolidation;
       }
@@ -286,5 +305,47 @@ router.get('/profiles', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+// Helper function to calculate question consolidation based on answer history
+function calculateQuestionConsolidation(questionAnswers) {
+  if (questionAnswers.length === 0) return 0;
+  
+  // Sort by timestamp (most recent first)
+  questionAnswers.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  
+  let consolidationScore = 0;
+  const now = new Date();
+  
+  for (let i = 0; i < questionAnswers.length; i++) {
+    const answer = questionAnswers[i];
+    const answerDate = new Date(answer.timestamp);
+    const daysAgo = (now - answerDate) / (1000 * 60 * 60 * 24);
+    
+    // Weight calculation: more recent answers weigh more
+    const recencyWeight = Math.max(0.1, 1 / (1 + daysAgo / 30)); // Decay over 30 days
+    
+    // Position weight: first attempt weighs more than later attempts
+    const positionWeight = Math.max(0.3, 1 / (1 + i * 0.5));
+    
+    if (answer.result === 'ACIERTO') {
+      consolidationScore += 20 * recencyWeight * positionWeight;
+    } else if (answer.result === 'FALLO') {
+      consolidationScore -= 5 * recencyWeight * positionWeight;
+    }
+    // BLANK answers don't affect the score directly
+  }
+  
+  // Normalize to 0-100 scale
+  consolidationScore = Math.max(0, Math.min(100, consolidationScore));
+  
+  // Bonus for consistency: if last 3 answers are correct, add bonus
+  const lastThreeAnswers = questionAnswers.slice(0, 3);
+  if (lastThreeAnswers.length >= 2 && 
+      lastThreeAnswers.every(a => a.result === 'ACIERTO')) {
+    consolidationScore = Math.min(100, consolidationScore + 15);
+  }
+  
+  return consolidationScore;
+}
 
 module.exports = router;
