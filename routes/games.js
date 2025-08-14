@@ -676,6 +676,92 @@ router.get('/history/:userId', authenticateToken, async (req, res) => {
   }
 });
 
+// === GAME CONFIGURATIONS (Active Games) ENDPOINTS ===
+// Save game configuration for Active Games panel
+router.post('/configurations', authenticateToken, async (req, res) => {
+  try {
+    const { gameType, config, configurationMetadata } = req.body;
+    const userId = req.user.userId;
+
+    // Auto-create table if it doesn't exist
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS game_configurations (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        game_type VARCHAR(50) NOT NULL,
+        config JSONB NOT NULL,
+        configuration_metadata JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
+
+    const result = await pool.query(
+      'INSERT INTO game_configurations (user_id, game_type, config, configuration_metadata) VALUES ($1, $2, $3, $4) RETURNING *',
+      [userId, gameType, config, configurationMetadata]
+    );
+
+    console.log('✅ Game configuration saved:', result.rows[0].id);
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('❌ Error saving game configuration:', error);
+    res.status(500).json({ error: 'Failed to save game configuration', details: error.message });
+  }
+});
+
+// Get all game configurations for current user
+router.get('/configurations', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    // Auto-create table if it doesn't exist
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS game_configurations (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        game_type VARCHAR(50) NOT NULL,
+        config JSONB NOT NULL,
+        configuration_metadata JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
+
+    const result = await pool.query(
+      'SELECT * FROM game_configurations WHERE user_id = $1 ORDER BY created_at DESC',
+      [userId]
+    );
+
+    console.log('✅ Fetched game configurations:', result.rows.length, 'configurations for user', userId);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('❌ Error fetching game configurations:', error);
+    res.status(500).json({ error: 'Failed to fetch game configurations', details: error.message });
+  }
+});
+
+// Delete a specific game configuration
+router.delete('/configurations/:configId', authenticateToken, async (req, res) => {
+  try {
+    const { configId } = req.params;
+    const userId = req.user.userId;
+
+    const result = await pool.query(
+      'DELETE FROM game_configurations WHERE id = $1 AND user_id = $2 RETURNING *',
+      [configId, userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Configuration not found' });
+    }
+
+    console.log('✅ Game configuration deleted:', configId);
+    res.json({ message: 'Configuration deleted successfully' });
+  } catch (error) {
+    console.error('❌ Error deleting game configuration:', error);
+    res.status(500).json({ error: 'Failed to delete game configuration', details: error.message });
+  }
+});
 
 // Debug route to check table structure
 router.get('/debug/tables', authenticateToken, async (req, res) => {
