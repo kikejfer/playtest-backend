@@ -616,7 +616,7 @@ router.get('/history/:userId', authenticateToken, async (req, res) => {
 
     console.log(`Found ${result.rows.length} completed games for user ${userId}`);
 
-    const history = result.rows.map(row => {
+    const history = await Promise.all(result.rows.map(async (row) => {
       const scoreData = row.score_data || {};
       const config = row.config || {};
       const correctAnswers = scoreData.score || 0;
@@ -632,11 +632,27 @@ router.get('/history/:userId', authenticateToken, async (req, res) => {
           
           // Iterate through each block in the configuration
           for (const [blockId, blockConfig] of Object.entries(config)) {
-            if (blockConfig && blockConfig.topics && Array.isArray(blockConfig.topics)) {
-              // Count questions only for configured topics
-              totalConfigQuestions += blockConfig.topics.reduce((sum, topic) => {
-                return sum + (topic.questionCount || 0);
-              }, 0);
+            if (blockConfig) {
+              if (blockConfig.topics === 'all') {
+                // If all topics are selected, use all block questions
+                totalConfigQuestions += parseInt(row.total_block_questions) || 0;
+              } else if (Array.isArray(blockConfig.topics)) {
+                // Need to query the actual block questions to count topics
+                try {
+                  const blockQuestionsResult = await pool.query(
+                    'SELECT COUNT(*) as count FROM questions WHERE block_id = $1 AND tema = ANY($2)',
+                    [parseInt(blockId), blockConfig.topics]
+                  );
+                  const topicQuestionCount = parseInt(blockQuestionsResult.rows[0]?.count) || 0;
+                  totalConfigQuestions += topicQuestionCount;
+                  console.log(`📊 Block ${blockId}: Found ${topicQuestionCount} questions for topics [${blockConfig.topics.join(', ')}]`);
+                } catch (queryError) {
+                  console.warn(`⚠️ Failed to count questions for block ${blockId}, topics:`, blockConfig.topics, queryError.message);
+                  // Fallback: estimate based on percentage of topics
+                  const estimatedQuestions = Math.round((parseInt(row.total_block_questions) || 0) * blockConfig.topics.length / 10);
+                  totalConfigQuestions += estimatedQuestions;
+                }
+              }
             }
           }
           
@@ -664,7 +680,7 @@ router.get('/history/:userId', authenticateToken, async (req, res) => {
         opponent: null, // Could be extended for multiplayer games
         date: row.created_at
       };
-    });
+    }));
 
     console.log(`Returning ${history.length} history entries`);
     res.json(history);
