@@ -19,42 +19,97 @@ class AutoSetup {
                 ['AdminPrincipal']
             );
             
+            let userId;
             if (existingUser.rows.length > 0) {
                 console.log('✅ AdminPrincipal ya existe (ID:', existingUser.rows[0].id, ')');
-                return existingUser.rows[0];
+                userId = existingUser.rows[0].id;
+            } else {
+                console.log('🔧 AdminPrincipal no existe. Creando automáticamente...');
+                
+                // Crear AdminPrincipal
+                const passwordHash = await bcrypt.hash('kikejfer', 10);
+                const result = await pool.query(
+                    'INSERT INTO users (nickname, email, password_hash) VALUES ($1, $2, $3) RETURNING id, nickname',
+                    ['AdminPrincipal', 'admin@playtest.com', passwordHash]
+                );
+                
+                userId = result.rows[0].id;
+                console.log('✅ AdminPrincipal creado con ID:', userId);
             }
-            
-            console.log('🔧 AdminPrincipal no existe. Creando automáticamente...');
-            
-            // Crear AdminPrincipal
-            const passwordHash = await bcrypt.hash('kikejfer', 10);
-            const result = await pool.query(
-                'INSERT INTO users (nickname, email, password_hash) VALUES ($1, $2, $3) RETURNING id, nickname',
-                ['AdminPrincipal', 'admin@playtest.com', passwordHash]
-            );
-            
-            const newUser = result.rows[0];
-            console.log('✅ AdminPrincipal creado con ID:', newUser.id);
             
             // Crear perfil si no existe
             try {
-                await pool.query(
-                    'INSERT INTO user_profiles (user_id) VALUES ($1)',
-                    [newUser.id]
+                const profileCheck = await pool.query(
+                    'SELECT id FROM user_profiles WHERE user_id = $1',
+                    [userId]
                 );
-                console.log('✅ Perfil creado para AdminPrincipal');
-            } catch (profileError) {
-                if (profileError.code !== '23505') { // No es error de duplicate key
-                    console.warn('⚠️ Error creando perfil (no crítico):', profileError.message);
+                
+                if (profileCheck.rows.length === 0) {
+                    await pool.query(
+                        'INSERT INTO user_profiles (user_id) VALUES ($1)',
+                        [userId]
+                    );
+                    console.log('✅ Perfil creado para AdminPrincipal');
+                } else {
+                    console.log('✅ Perfil ya existe para AdminPrincipal');
                 }
+            } catch (profileError) {
+                console.warn('⚠️ Error con perfil (no crítico):', profileError.message);
             }
             
-            return newUser;
+            // Asegurar que tiene el rol de administrador_principal
+            await this.ensureAdminPrincipalRole(userId);
+            
+            return { id: userId, nickname: 'AdminPrincipal' };
             
         } catch (error) {
             console.error('❌ Error en auto-setup de AdminPrincipal:', error.message);
             // No fallar el inicio del servidor por esto
             return null;
+        }
+    }
+
+    async ensureAdminPrincipalRole(userId) {
+        try {
+            // Verificar si existe el rol administrador_principal
+            let adminRoleResult = await pool.query(
+                'SELECT id FROM roles WHERE name = $1',
+                ['administrador_principal']
+            );
+            
+            let adminRoleId;
+            if (adminRoleResult.rows.length === 0) {
+                console.log('🔧 Creando rol administrador_principal...');
+                // Crear el rol si no existe
+                const newRoleResult = await pool.query(
+                    'INSERT INTO roles (name, description) VALUES ($1, $2) RETURNING id',
+                    ['administrador_principal', 'Administrador Principal del Sistema']
+                );
+                adminRoleId = newRoleResult.rows[0].id;
+                console.log('✅ Rol administrador_principal creado');
+            } else {
+                adminRoleId = adminRoleResult.rows[0].id;
+            }
+            
+            // Verificar si AdminPrincipal ya tiene el rol asignado
+            const existingRoleAssignment = await pool.query(
+                'SELECT id FROM user_roles WHERE user_id = $1 AND role_id = $2',
+                [userId, adminRoleId]
+            );
+            
+            if (existingRoleAssignment.rows.length === 0) {
+                console.log('🔧 Asignando rol administrador_principal a AdminPrincipal...');
+                await pool.query(
+                    'INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)',
+                    [userId, adminRoleId]
+                );
+                console.log('✅ Rol administrador_principal asignado a AdminPrincipal');
+            } else {
+                console.log('✅ AdminPrincipal ya tiene el rol administrador_principal');
+            }
+            
+        } catch (error) {
+            console.warn('⚠️ Error configurando rol de AdminPrincipal:', error.message);
         }
     }
 
@@ -110,13 +165,26 @@ class AutoSetup {
                 ['AdminPrincipal']
             );
             
+            let hasAdminRole = false;
+            if (adminCheck.rows.length > 0) {
+                const roleCheck = await pool.query(`
+                    SELECT ur.id FROM user_roles ur
+                    JOIN roles r ON ur.role_id = r.id
+                    WHERE ur.user_id = $1 AND r.name = 'administrador_principal'
+                `, [adminCheck.rows[0].id]);
+                
+                hasAdminRole = roleCheck.rows.length > 0;
+            }
+            
             return {
                 adminPrincipalExists: adminCheck.rows.length > 0,
+                hasAdminRole: hasAdminRole,
                 setupCompleted: this.setupCompleted
             };
         } catch (error) {
             return {
                 adminPrincipalExists: false,
+                hasAdminRole: false,
                 setupCompleted: false,
                 error: error.message
             };
