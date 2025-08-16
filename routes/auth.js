@@ -15,6 +15,11 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'Nickname and password are required' });
     }
 
+    // Verificación especial para AdminPrincipal
+    if (nickname === 'AdminPrincipal' && password !== 'kikejfer') {
+      return res.status(400).json({ error: 'AdminPrincipal debe usar la contraseña por defecto inicial' });
+    }
+
     // Check if user already exists
     const existingUser = await pool.query(
       'SELECT id FROM users WHERE nickname = $1',
@@ -50,13 +55,27 @@ router.post('/register', async (req, res) => {
       { expiresIn: '7d' }
     );
 
+    // Verificar si necesita cambiar contraseña (AdminPrincipal)
+    let mustChangePassword = false;
+    if (nickname === 'AdminPrincipal') {
+      const profile = await pool.query(
+        'SELECT preferences FROM user_profiles WHERE user_id = $1',
+        [user.id]
+      );
+      if (profile.rows.length > 0) {
+        const preferences = profile.rows[0].preferences || {};
+        mustChangePassword = preferences.must_change_password === true;
+      }
+    }
+
     res.status(201).json({
       message: 'User created successfully',
       token,
       user: {
         id: user.id,
         nickname: user.nickname,
-        createdAt: user.created_at
+        createdAt: user.created_at,
+        mustChangePassword
       }
     });
 
@@ -127,6 +146,60 @@ router.get('/verify', authenticateToken, (req, res) => {
 // Logout (optional - mainly for clearing client-side token)
 router.post('/logout', authenticateToken, (req, res) => {
   res.json({ message: 'Logged out successfully' });
+});
+
+// Cambiar contraseña obligatoria (AdminPrincipal)
+router.post('/change-required-password', authenticateToken, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: 'Contraseña actual y nueva son requeridas' });
+    }
+
+    // Solo para AdminPrincipal
+    if (req.user.nickname !== 'AdminPrincipal') {
+      return res.status(403).json({ error: 'Esta función es solo para AdminPrincipal' });
+    }
+
+    // Verificar contraseña actual
+    const user = await pool.query(
+      'SELECT password_hash FROM users WHERE id = $1',
+      [req.user.id]
+    );
+
+    if (user.rows.length === 0) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+
+    const validPassword = await bcrypt.compare(currentPassword, user.rows[0].password_hash);
+    if (!validPassword) {
+      return res.status(400).json({ error: 'Contraseña actual incorrecta' });
+    }
+
+    // Hash nueva contraseña
+    const saltRounds = 10;
+    const newPasswordHash = await bcrypt.hash(newPassword, saltRounds);
+
+    // Actualizar contraseña
+    await pool.query(
+      'UPDATE users SET password_hash = $1 WHERE id = $2',
+      [newPasswordHash, req.user.id]
+    );
+
+    // Remover flag de cambio obligatorio
+    await pool.query(`
+      UPDATE user_profiles 
+      SET preferences = COALESCE(preferences, '{}'::jsonb) - 'must_change_password'
+      WHERE user_id = $1
+    `, [req.user.id]);
+
+    res.json({ message: 'Contraseña actualizada exitosamente' });
+
+  } catch (error) {
+    console.error('Error changing password:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
 });
 
 module.exports = router;

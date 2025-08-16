@@ -676,4 +676,331 @@ router.delete('/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// EXPANDED BLOCK CREATION API ENDPOINTS
+
+// Get knowledge areas
+router.get('/knowledge-areas', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, name, description, parent_id
+      FROM knowledge_areas 
+      WHERE is_active = true
+      ORDER BY name
+    `);
+    
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching knowledge areas:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get tag suggestions based on knowledge area
+router.get('/tag-suggestions', authenticateToken, async (req, res) => {
+  try {
+    const { knowledge_area_id, education_level, block_type } = req.query;
+    
+    const result = await pool.query(`
+      SELECT DISTINCT bt.name, bt.usage_count
+      FROM block_tags bt
+      JOIN block_tag_relations btr ON bt.id = btr.tag_id
+      JOIN blocks b ON btr.block_id = b.id
+      WHERE ($1::integer IS NULL OR b.knowledge_area_id = $1::integer)
+        AND ($2::text IS NULL OR b.education_level = $2)
+        AND ($3::text IS NULL OR b.block_type = $3)
+      ORDER BY bt.usage_count DESC
+      LIMIT 20
+    `, [knowledge_area_id || null, education_level || null, block_type || null]);
+    
+    res.json(result.rows.map(row => row.name));
+  } catch (error) {
+    console.error('Error fetching tag suggestions:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Create expanded block with metadata
+router.post('/create-expanded', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  
+  try {
+    await client.query('BEGIN');
+    
+    const {
+      name,
+      description,
+      detailed_description,
+      block_type,
+      education_level,
+      scope,
+      knowledge_area_id,
+      difficulty_level,
+      content_language,
+      author_observations,
+      tags = [],
+      block_state = 'private'
+    } = req.body;
+
+    // Validate required fields
+    if (!name || !detailed_description || !knowledge_area_id) {
+      return res.status(400).json({ 
+        error: 'Campos requeridos: name, detailed_description, knowledge_area_id' 
+      });
+    }
+
+    // Create the block
+    const blockResult = await client.query(`
+      INSERT INTO blocks (
+        name, description, detailed_description, block_type, education_level, 
+        scope, knowledge_area_id, difficulty_level, content_language, 
+        author_observations, block_state, creator_id, is_public
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+      ) RETURNING *
+    `, [
+      name, 
+      description || detailed_description.substring(0, 200), 
+      detailed_description,
+      block_type,
+      education_level,
+      scope,
+      knowledge_area_id,
+      difficulty_level,
+      content_language,
+      author_observations,
+      block_state,
+      req.user.id,
+      block_state === 'public'
+    ]);
+
+    const newBlock = blockResult.rows[0];
+
+    // Process tags
+    if (tags && tags.length > 0) {
+      for (const tagName of tags) {
+        // Insert or get tag
+        const tagResult = await client.query(`
+          INSERT INTO block_tags (name) VALUES ($1)
+          ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+          RETURNING id
+        `, [tagName.trim()]);
+        
+        const tagId = tagResult.rows[0].id;
+        
+        // Link tag to block
+        await client.query(`
+          INSERT INTO block_tag_relations (block_id, tag_id)
+          VALUES ($1, $2)
+          ON CONFLICT (block_id, tag_id) DO NOTHING
+        `, [newBlock.id, tagId]);
+      }
+    }
+
+    await client.query('COMMIT');
+
+    res.status(201).json({
+      message: 'Bloque creado exitosamente',
+      block: newBlock
+    });
+
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error creating expanded block:', error);
+    res.status(500).json({ 
+      error: 'Error interno del servidor',
+      details: error.message 
+    });
+  } finally {
+    client.release();
+  }
+});
+
+// Validate block for publication
+router.post('/:id/validate', authenticateToken, async (req, res) => {
+  try {
+    const blockId = parseInt(req.params.id);
+    
+    // Check if user owns the block
+    const ownerCheck = await pool.query(
+      'SELECT creator_id FROM blocks WHERE id = $1',
+      [blockId]
+    );
+
+    if (ownerCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Bloque no encontrado' });
+    }
+
+    if (ownerCheck.rows[0].creator_id !== req.user.id) {
+      return res.status(403).json({ error: 'No autorizado para validar este bloque' });
+    }
+
+    // Use the validation function
+    const validationResult = await pool.query(
+      'SELECT * FROM validate_block_for_publication($1)',
+      [blockId]
+    );
+
+    const validation = validationResult.rows[0];
+    
+    res.json({
+      is_valid: validation.is_valid,
+      missing_fields: validation.missing_fields || [],
+      warnings: validation.warnings || []
+    });
+
+  } catch (error) {
+    console.error('Error validating block:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// Update block state (private/public/restricted/archived)
+router.patch('/:id/state', authenticateToken, async (req, res) => {
+  try {
+    const blockId = parseInt(req.params.id);
+    const { state, reason } = req.body;
+    
+    const validStates = ['private', 'public', 'restricted', 'archived'];
+    if (!validStates.includes(state)) {
+      return res.status(400).json({ error: 'Estado inválido' });
+    }
+    
+    // Check if user owns the block
+    const ownerCheck = await pool.query(
+      'SELECT creator_id FROM blocks WHERE id = $1',
+      [blockId]
+    );
+
+    if (ownerCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Bloque no encontrado' });
+    }
+
+    if (ownerCheck.rows[0].creator_id !== req.user.id) {
+      return res.status(403).json({ error: 'No autorizado para modificar este bloque' });
+    }
+
+    // If changing to public, validate first
+    if (state === 'public') {
+      const validationResult = await pool.query(
+        'SELECT is_valid FROM validate_block_for_publication($1)',
+        [blockId]
+      );
+      
+      if (!validationResult.rows[0]?.is_valid) {
+        return res.status(400).json({ 
+          error: 'El bloque no cumple los requisitos para publicación',
+          validation_required: true
+        });
+      }
+    }
+
+    // Update the state
+    const result = await pool.query(`
+      UPDATE blocks 
+      SET block_state = $1, is_public = $2, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $3 
+      RETURNING *
+    `, [state, state === 'public', blockId]);
+
+    // Log the state change if reason provided
+    if (reason) {
+      await pool.query(`
+        INSERT INTO block_state_history (block_id, previous_state, new_state, changed_by, change_reason)
+        VALUES ($1, 
+          (SELECT block_state FROM blocks WHERE id = $1),
+          $2, $3, $4)
+      `, [blockId, state, req.user.id, reason]);
+    }
+
+    res.json({
+      message: 'Estado del bloque actualizado exitosamente',
+      block: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Error updating block state:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// Search blocks with advanced filters
+router.get('/search', authenticateToken, async (req, res) => {
+  try {
+    const {
+      search_text,
+      block_type,
+      education_level,
+      scope,
+      knowledge_area_id,
+      difficulty_level,
+      content_language,
+      tags,
+      creator_id,
+      min_rating,
+      block_state = 'public',
+      limit = 20,
+      offset = 0
+    } = req.query;
+
+    // Parse tags if provided
+    const tagsArray = tags ? (Array.isArray(tags) ? tags : tags.split(',')) : null;
+
+    const result = await pool.query(`
+      SELECT * FROM search_blocks_advanced(
+        $1::text, $2::varchar, $3::varchar, $4::varchar, $5::integer,
+        $6::varchar, $7::varchar, $8::text[], $9::integer, $10::decimal,
+        $11::varchar, $12::integer, $13::integer
+      )
+    `, [
+      search_text || null,
+      block_type || null,
+      education_level || null,
+      scope || null,
+      knowledge_area_id ? parseInt(knowledge_area_id) : null,
+      difficulty_level || null,
+      content_language || null,
+      tagsArray,
+      creator_id ? parseInt(creator_id) : null,
+      min_rating ? parseFloat(min_rating) : null,
+      block_state,
+      parseInt(limit),
+      parseInt(offset)
+    ]);
+
+    res.json(result.rows);
+
+  } catch (error) {
+    console.error('Error searching blocks:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// Get block with complete metadata
+router.get('/:id/complete', authenticateToken, async (req, res) => {
+  try {
+    const blockId = parseInt(req.params.id);
+    
+    const result = await pool.query(`
+      SELECT * FROM blocks_complete_info WHERE id = $1
+    `, [blockId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Bloque no encontrado' });
+    }
+
+    const block = result.rows[0];
+    
+    // Check access permissions
+    if (block.block_state !== 'public' && block.creator_id !== req.user.id) {
+      return res.status(403).json({ error: 'No tienes acceso a este bloque' });
+    }
+
+    res.json(block);
+
+  } catch (error) {
+    console.error('Error fetching complete block info:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
 module.exports = router;

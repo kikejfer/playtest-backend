@@ -54,6 +54,9 @@ const userRoutes = require('./routes/users');
 const blockRoutes = require('./routes/blocks');
 const questionRoutes = require('./routes/questions');
 const gameRoutes = require('./routes/games');
+const roleRoutes = require('./routes/roles');
+const rolesUpdatedRoutes = require('./routes/roles-updated');
+const communicationRoutes = require('./routes/communication');
 
 // Use routes
 app.use('/api/auth', authRoutes);
@@ -61,6 +64,9 @@ app.use('/api/users', userRoutes);
 app.use('/api/blocks', blockRoutes);
 app.use('/api/questions', questionRoutes);
 app.use('/api/games', gameRoutes);
+app.use('/api/roles', roleRoutes);
+app.use('/api/roles-updated', rolesUpdatedRoutes);
+app.use('/api/communication', communicationRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -81,9 +87,19 @@ app.use('*', (req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
+// Initialize escalation scheduler
+const EscalationScheduler = require('./setup-cron');
+const escalationScheduler = new EscalationScheduler();
+
+// Make scheduler globally accessible for API routes
+global.escalationScheduler = escalationScheduler;
+
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📱 Environment: ${process.env.NODE_ENV}`);
+  
+  // Start escalation scheduler
+  escalationScheduler.start();
 });
 
 console.log('Deploy timestamp:', new Date().toISOString());
