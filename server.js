@@ -57,6 +57,7 @@ const gameRoutes = require('./routes/games');
 const roleRoutes = require('./routes/roles');
 const rolesUpdatedRoutes = require('./routes/roles-updated');
 const communicationRoutes = require('./routes/communication');
+const supportRoutes = require('./routes/support');
 
 // Use routes
 app.use('/api/auth', authRoutes);
@@ -67,10 +68,29 @@ app.use('/api/games', gameRoutes);
 app.use('/api/roles', roleRoutes);
 app.use('/api/roles-updated', rolesUpdatedRoutes);
 app.use('/api/communication', communicationRoutes);
+app.use('/api/support', supportRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
+});
+
+// Auto-setup status endpoint
+app.get('/api/setup/status', async (req, res) => {
+  try {
+    const status = await autoSetup.checkStatus();
+    res.json({
+      status: 'OK',
+      autoSetup: status,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'ERROR',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 // Error handling middleware
@@ -91,15 +111,32 @@ app.use('*', (req, res) => {
 const EscalationScheduler = require('./setup-cron');
 const escalationScheduler = new EscalationScheduler();
 
-// Make scheduler globally accessible for API routes
-global.escalationScheduler = escalationScheduler;
+// Initialize support automation system
+const supportAutomation = require('./support-automation');
 
-app.listen(PORT, () => {
+// Auto-setup system
+const autoSetup = require('./auto-setup');
+
+// Make schedulers globally accessible for API routes
+global.escalationScheduler = escalationScheduler;
+global.supportAutomation = supportAutomation;
+
+app.listen(PORT, async () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📱 Environment: ${process.env.NODE_ENV}`);
   
+  // Run auto-setup (only executes if needed)
+  await autoSetup.runAutoSetup();
+  
   // Start escalation scheduler
   escalationScheduler.start();
+  
+  // Start support automation system
+  supportAutomation.start().then(() => {
+    console.log('🤖 Sistema de automatización de soporte iniciado');
+  }).catch(err => {
+    console.error('❌ Error iniciando sistema de automatización:', err);
+  });
 });
 
 console.log('Deploy timestamp:', new Date().toISOString());

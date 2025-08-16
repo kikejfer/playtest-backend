@@ -1,8 +1,12 @@
 const express = require('express');
 const pool = require('../database/connection');
 const { authenticateToken } = require('../middleware/auth');
+const ImageSearchService = require('../image-search');
 
 const router = express.Router();
+
+// Initialize image search service
+const imageSearch = new ImageSearchService();
 
 // Get all blocks with questions (temporary - will be 'loaded blocks' after migration)
 router.get('/', authenticateToken, async (req, res) => {
@@ -10,14 +14,14 @@ router.get('/', authenticateToken, async (req, res) => {
     console.log('🔍 /blocks endpoint called for user:', req.user.id);
     
     const blocksResult = await pool.query(`
-      SELECT b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at,
+      SELECT b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at, b.image_url,
         u.nickname as creator_nickname,
         COUNT(q.id) as question_count
       FROM blocks b
       LEFT JOIN users u ON b.creator_id = u.id
       LEFT JOIN questions q ON b.id = q.block_id
       WHERE b.is_public = true OR b.creator_id = $1
-      GROUP BY b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at, u.nickname
+      GROUP BY b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at, b.image_url, u.nickname
       ORDER BY b.created_at DESC
     `, [req.user.id]);
     
@@ -66,6 +70,7 @@ router.get('/', authenticateToken, async (req, res) => {
         creatorNickname: block.creator_nickname,
         isPublic: block.is_public,
         questionCount: parseInt(block.question_count),
+        imageUrl: block.image_url,
         questions: questions
       });
     }
@@ -95,14 +100,14 @@ router.get('/available', authenticateToken, async (req, res) => {
     console.log('🔍 Total public blocks:', testQuery.rows[0]?.total || 0);
     
     const blocksResult = await pool.query(`
-      SELECT b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at,
+      SELECT b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at, b.image_url,
         u.nickname as creator_nickname,
         COUNT(q.id) as question_count
       FROM blocks b
       LEFT JOIN users u ON b.creator_id = u.id
       LEFT JOIN questions q ON b.id = q.block_id
       WHERE b.is_public = true
-      GROUP BY b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at, u.nickname
+      GROUP BY b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at, b.image_url, u.nickname
       ORDER BY b.created_at DESC
     `);
 
@@ -155,6 +160,7 @@ router.get('/available', authenticateToken, async (req, res) => {
         creatorNickname: block.creator_nickname || 'Unknown',
         isPublic: block.is_public,
         questionCount: parseInt(block.question_count) || 0,
+        imageUrl: block.image_url,
         questions: questions
       });
     }
@@ -195,14 +201,14 @@ router.get('/loaded', authenticateToken, async (req, res) => {
     // Get the actual blocks that are loaded
     const placeholders = loadedBlockIds.map((_, index) => `$${index + 2}`).join(',');
     const blocksResult = await pool.query(`
-      SELECT b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at,
+      SELECT b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at, b.image_url,
         u.nickname as creator_nickname,
         COUNT(q.id) as question_count
       FROM blocks b
       LEFT JOIN users u ON b.creator_id = u.id
       LEFT JOIN questions q ON b.id = q.block_id
       WHERE b.id = ANY($1)
-      GROUP BY b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at, u.nickname
+      GROUP BY b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at, b.image_url, u.nickname
       ORDER BY b.created_at DESC
     `, [loadedBlockIds]);
 
@@ -255,6 +261,7 @@ router.get('/loaded', authenticateToken, async (req, res) => {
         creatorNickname: block.creator_nickname || 'Unknown',
         isPublic: block.is_public,
         questionCount: parseInt(block.question_count) || 0,
+        imageUrl: block.image_url,
         questions: questions
       });
     }
@@ -284,14 +291,14 @@ router.get('/created', authenticateToken, async (req, res) => {
     console.log('🔍 Total created blocks for user:', testQuery.rows[0]?.total || 0);
     
     const blocksResult = await pool.query(`
-      SELECT b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at,
+      SELECT b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at, b.image_url,
         u.nickname as creator_nickname,
         COUNT(q.id) as question_count
       FROM blocks b
       LEFT JOIN users u ON b.creator_id = u.id
       LEFT JOIN questions q ON b.id = q.block_id
       WHERE b.creator_id = $1
-      GROUP BY b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at, u.nickname
+      GROUP BY b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at, b.image_url, u.nickname
       ORDER BY b.created_at DESC
     `, [req.user.id]);
 
@@ -344,6 +351,7 @@ router.get('/created', authenticateToken, async (req, res) => {
         creatorNickname: block.creator_nickname || 'Unknown',
         isPublic: block.is_public,
         questionCount: parseInt(block.question_count) || 0,
+        imageUrl: block.image_url,
         questions: questions
       });
     }
@@ -459,14 +467,25 @@ router.post('/', authenticateToken, async (req, res) => {
 
     console.log('🔧 Creating block:', { name, description, isPublic, userId: req.user.id });
 
-    // Create the block first
+    // Search for related image
+    console.log('📸 Searching for block image...');
+    let imageUrl = null;
+    try {
+      imageUrl = await imageSearch.searchImage(name, description || '', '');
+      console.log('📸 Image found:', imageUrl);
+    } catch (imageError) {
+      console.warn('⚠️ Could not find image for block, using fallback:', imageError.message);
+      imageUrl = imageSearch.getRandomFallbackImage();
+    }
+
+    // Create the block with image
     const result = await pool.query(
-      'INSERT INTO blocks (name, description, creator_id, is_public) VALUES ($1, $2, $3, $4) RETURNING *',
-      [name, description, req.user.id, isPublic]
+      'INSERT INTO blocks (name, description, creator_id, is_public, image_url) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      [name, description, req.user.id, isPublic, imageUrl]
     );
 
     const newBlock = result.rows[0];
-    console.log('✅ Block created:', newBlock.id);
+    console.log('✅ Block created:', newBlock.id, 'with image:', imageUrl);
 
     // Try to auto-load the block (non-critical - if it fails, still return success)
     try {
@@ -748,14 +767,32 @@ router.post('/create-expanded', authenticateToken, async (req, res) => {
       });
     }
 
+    // Search for related image based on knowledge area and content
+    console.log('📸 Searching for expanded block image...');
+    let imageUrl = null;
+    try {
+      // Get knowledge area name for better image search
+      const knowledgeAreaResult = await client.query(
+        'SELECT name FROM knowledge_areas WHERE id = $1',
+        [knowledge_area_id]
+      );
+      const knowledgeAreaName = knowledgeAreaResult.rows[0]?.name || '';
+      
+      imageUrl = await imageSearch.searchImage(name, detailed_description, knowledgeAreaName);
+      console.log('📸 Expanded block image found:', imageUrl);
+    } catch (imageError) {
+      console.warn('⚠️ Could not find image for expanded block, using fallback:', imageError.message);
+      imageUrl = imageSearch.getRandomFallbackImage();
+    }
+
     // Create the block
     const blockResult = await client.query(`
       INSERT INTO blocks (
         name, description, detailed_description, block_type, education_level, 
         scope, knowledge_area_id, difficulty_level, content_language, 
-        author_observations, block_state, creator_id, is_public
+        author_observations, block_state, creator_id, is_public, image_url
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
       ) RETURNING *
     `, [
       name, 
@@ -770,7 +807,8 @@ router.post('/create-expanded', authenticateToken, async (req, res) => {
       author_observations,
       block_state,
       req.user.id,
-      block_state === 'public'
+      block_state === 'public',
+      imageUrl
     ]);
 
     const newBlock = blockResult.rows[0];
@@ -971,6 +1009,66 @@ router.get('/search', authenticateToken, async (req, res) => {
 
   } catch (error) {
     console.error('Error searching blocks:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// Regenerate block image
+router.post('/:id/regenerate-image', authenticateToken, async (req, res) => {
+  try {
+    const blockId = parseInt(req.params.id);
+    
+    // Check if user owns the block
+    const ownerCheck = await pool.query(
+      'SELECT creator_id, name, description, knowledge_area_id FROM blocks WHERE id = $1',
+      [blockId]
+    );
+
+    if (ownerCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Bloque no encontrado' });
+    }
+
+    if (ownerCheck.rows[0].creator_id !== req.user.id) {
+      return res.status(403).json({ error: 'No autorizado para modificar este bloque' });
+    }
+
+    const block = ownerCheck.rows[0];
+    
+    console.log('🔄 Regenerating image for block:', blockId);
+    
+    // Search for new image
+    let imageUrl = null;
+    try {
+      // Get knowledge area name if available
+      let knowledgeAreaName = '';
+      if (block.knowledge_area_id) {
+        const knowledgeAreaResult = await pool.query(
+          'SELECT name FROM knowledge_areas WHERE id = $1',
+          [block.knowledge_area_id]
+        );
+        knowledgeAreaName = knowledgeAreaResult.rows[0]?.name || '';
+      }
+      
+      imageUrl = await imageSearch.searchImage(block.name, block.description || '', knowledgeAreaName);
+      console.log('📸 New image found:', imageUrl);
+    } catch (imageError) {
+      console.warn('⚠️ Could not find new image, using fallback:', imageError.message);
+      imageUrl = imageSearch.getRandomFallbackImage();
+    }
+
+    // Update the block with new image
+    const result = await pool.query(
+      'UPDATE blocks SET image_url = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING image_url',
+      [imageUrl, blockId]
+    );
+
+    res.json({
+      message: 'Imagen del bloque regenerada exitosamente',
+      imageUrl: result.rows[0].image_url
+    });
+
+  } catch (error) {
+    console.error('Error regenerating block image:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 });

@@ -1,5 +1,6 @@
 const fs = require('fs').promises;
 const { Pool } = require('pg');
+const createAdminPrincipal = require('./create-admin-principal');
 require('dotenv').config();
 
 const pool = new Pool({
@@ -49,10 +50,14 @@ async function deploy() {
         `);
         console.log(`✅ Total de tablas: ${tablesResult.rows[0].count}`);
         
+        // Crear AdminPrincipal automáticamente
+        console.log('\n👤 Configurando usuario AdminPrincipal...');
+        await createAdminPrincipal();
+        
         console.log('\n🎉 ¡Despliegue completado exitosamente!');
         console.log('\n📋 Próximos pasos:');
         console.log('   1. Reiniciar servidor: npm start');
-        console.log('   2. Crear usuario "AdminPrincipal"');
+        console.log('   2. ✅ AdminPrincipal ya está creado');
         console.log('   3. Probar formularios de soporte');
         
     } catch (error) {
