@@ -815,6 +815,58 @@ router.post('/add-admin-secundario', authenticateToken, async (req, res) => {
 });
 
 // Debug endpoint temporal para ver qué usuarios existen
+// Debug específico para las consultas del panel principal
+router.get('/debug-panel-queries', authenticateToken, async (req, res) => {
+    try {
+        console.log('Debug panel queries - starting...');
+        
+        // Probar consulta de usuarios
+        const usuariosTest = await pool.query(`
+            SELECT DISTINCT
+                u.id,
+                u.nickname,
+                COALESCE(u.email, 'Sin email') as email,
+                COALESCE(up.first_name, '') as first_name,
+                COALESCE(up.last_name, '') as last_name,
+                COALESCE(r.name, 'usuario') as role_name
+            FROM users u
+            LEFT JOIN user_profiles up ON u.id = up.user_id
+            LEFT JOIN user_roles ur ON u.id = ur.user_id
+            LEFT JOIN roles r ON ur.role_id = r.id
+            WHERE u.nickname != 'AdminPrincipal'
+            ORDER BY u.nickname
+            LIMIT 10
+        `);
+        
+        // Probar consulta de creadores
+        const creadoresTest = await pool.query(`
+            SELECT DISTINCT
+                u.id,
+                u.nickname,
+                COUNT(b.id) as blocks_created
+            FROM users u
+            LEFT JOIN blocks b ON u.id = b.creator_id
+            WHERE b.id IS NOT NULL AND u.nickname != 'AdminPrincipal'
+            GROUP BY u.id, u.nickname
+            ORDER BY COUNT(b.id) DESC
+            LIMIT 10
+        `);
+        
+        res.json({
+            success: true,
+            usuarios_query_result: usuariosTest.rows,
+            usuarios_count: usuariosTest.rows.length,
+            creadores_query_result: creadoresTest.rows,
+            creadores_count: creadoresTest.rows.length,
+            timestamp: new Date().toISOString()
+        });
+        
+    } catch (error) {
+        console.error('Debug panel queries error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 router.get('/debug-users', authenticateToken, async (req, res) => {
     try {
         // Usuarios básicos
