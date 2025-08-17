@@ -53,12 +53,12 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
         //     return res.status(403).json({ error: 'Se requieren permisos administrativos para acceder a este panel' });
         // }
 
-        // Sección 1: Administradores Secundarios - consulta ultra simplificada
-        console.log('Fetching admin secundarios...');
+        // Sección 1: Administradores (Principal y Secundarios)
+        console.log('Fetching administradores...');
         let adminSecundarios;
         try {
             adminSecundarios = await pool.query(`
-                SELECT 
+                SELECT DISTINCT
                     u.id,
                     u.nickname,
                     COALESCE(u.email, 'Sin email') as email,
@@ -67,26 +67,27 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                     0 as assigned_creators_count,
                     0 as total_blocks_assigned,
                     0 as total_questions_assigned,
-                    0 as luminarias
+                    0 as luminarias,
+                    r.name as role_name
                 FROM users u
                 LEFT JOIN user_roles ur ON u.id = ur.user_id
                 LEFT JOIN roles r ON ur.role_id = r.id
-                WHERE r.name = 'administrador_secundario' OR r.name IS NULL
+                WHERE r.name IN ('administrador_principal', 'administrador_secundario')
                 ORDER BY u.nickname
                 LIMIT 10
             `);
-            console.log('Admin secundarios found:', adminSecundarios.rows.length);
+            console.log('Administradores found:', adminSecundarios.rows.length);
         } catch (adminError) {
-            console.error('Error fetching admin secundarios:', adminError);
+            console.error('Error fetching administradores:', adminError);
             adminSecundarios = { rows: [] };
         }
 
-        // Sección 2: Profesores/Creadores - consulta ultra simplificada
-        console.log('Fetching profesores/creadores...');
+        // Sección 2: Creadores de Contenido (usuarios con bloques)
+        console.log('Fetching creadores de contenido...');
         let profesoresCreadores;
         try {
             profesoresCreadores = await pool.query(`
-                SELECT 
+                SELECT DISTINCT
                     u.id,
                     u.nickname,
                     COALESCE(u.email, 'Sin email') as email,
@@ -94,33 +95,36 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                     '' as last_name,
                     0 as assigned_admin_id,
                     'Sin asignar' as assigned_admin_nickname,
-                    0 as blocks_created,
-                    0 as total_questions,
+                    COUNT(b.id) as blocks_created,
+                    COALESCE(SUM(b.total_questions), 0) as total_questions,
                     0 as total_users_blocks,
                     0 as luminarias_actuales,
                     0 as luminarias_ganadas,
                     0 as luminarias_gastadas,
                     0 as luminarias_abonadas,
-                    0 as luminarias_compradas
+                    0 as luminarias_compradas,
+                    COALESCE(r.name, 'creador_contenido') as role_name
                 FROM users u
+                LEFT JOIN blocks b ON u.id = b.creator_id
                 LEFT JOIN user_roles ur ON u.id = ur.user_id
                 LEFT JOIN roles r ON ur.role_id = r.id
-                WHERE r.name IN ('creador_contenido', 'profesor') OR r.name IS NULL
-                ORDER BY u.nickname
-                LIMIT 10
+                WHERE b.id IS NOT NULL
+                GROUP BY u.id, u.nickname, u.email, r.name
+                ORDER BY COUNT(b.id) DESC, u.nickname
+                LIMIT 15
             `);
-            console.log('Profesores/creadores found:', profesoresCreadores.rows.length);
+            console.log('Creadores de contenido found:', profesoresCreadores.rows.length);
         } catch (profError) {
-            console.error('Error fetching profesores:', profError);
+            console.error('Error fetching creadores:', profError);
             profesoresCreadores = { rows: [] };
         }
 
-        // Sección 3: Usuarios (Jugadores) - consulta ultra simplificada
-        console.log('Fetching usuarios...');
+        // Sección 3: Usuarios regulares (excluyendo admins y creadores)
+        console.log('Fetching usuarios regulares...');
         let usuarios;
         try {
             usuarios = await pool.query(`
-                SELECT 
+                SELECT DISTINCT
                     u.id,
                     u.nickname,
                     COALESCE(u.email, 'Sin email') as email,
@@ -133,12 +137,18 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                     0 as luminarias_ganadas,
                     0 as luminarias_gastadas,
                     0 as luminarias_abonadas,
-                    0 as luminarias_compradas
+                    0 as luminarias_compradas,
+                    COALESCE(r.name, 'usuario') as role_name
                 FROM users u
+                LEFT JOIN user_roles ur ON u.id = ur.user_id
+                LEFT JOIN roles r ON ur.role_id = r.id
+                LEFT JOIN blocks b ON u.id = b.creator_id
+                WHERE (r.name IS NULL OR r.name = 'usuario') 
+                  AND b.id IS NULL
                 ORDER BY u.nickname
-                LIMIT 20
+                LIMIT 25
             `);
-            console.log('Usuarios found:', usuarios.rows.length);
+            console.log('Usuarios regulares found:', usuarios.rows.length);
         } catch (userError) {
             console.error('Error fetching usuarios:', userError);
             usuarios = { rows: [] };
