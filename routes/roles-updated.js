@@ -57,19 +57,20 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                     u.id,
                     u.nickname,
                     COALESCE(u.email, 'Sin email') as email,
-                    '' as first_name,
-                    '' as last_name,
+                    COALESCE(up.first_name, '') as first_name,
+                    COALESCE(up.last_name, '') as last_name,
                     0 as assigned_creators_count,
                     0 as total_blocks_assigned,
                     0 as total_questions_assigned,
                     0 as luminarias,
                     r.name as role_name
                 FROM users u
+                LEFT JOIN user_profiles up ON u.id = up.user_id
                 LEFT JOIN user_roles ur ON u.id = ur.user_id
                 LEFT JOIN roles r ON ur.role_id = r.id
                 WHERE r.name IN ('administrador_principal', 'administrador_secundario')
-                ORDER BY u.nickname
-                LIMIT 10
+                ORDER BY CASE WHEN r.name = 'administrador_principal' THEN 0 ELSE 1 END, u.nickname
+                LIMIT 15
             `);
             console.log('Administradores found:', adminSecundarios.rows.length);
         } catch (adminError) {
@@ -86,8 +87,8 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                     u.id,
                     u.nickname,
                     COALESCE(u.email, 'Sin email') as email,
-                    '' as first_name,
-                    '' as last_name,
+                    COALESCE(up.first_name, '') as first_name,
+                    COALESCE(up.last_name, '') as last_name,
                     0 as assigned_admin_id,
                     'Sin asignar' as assigned_admin_nickname,
                     COUNT(b.id) as blocks_created,
@@ -100,13 +101,14 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                     0 as luminarias_compradas,
                     COALESCE(r.name, 'creador_contenido') as role_name
                 FROM users u
+                LEFT JOIN user_profiles up ON u.id = up.user_id
                 LEFT JOIN blocks b ON u.id = b.creator_id
                 LEFT JOIN user_roles ur ON u.id = ur.user_id
                 LEFT JOIN roles r ON ur.role_id = r.id
                 WHERE b.id IS NOT NULL
-                GROUP BY u.id, u.nickname, u.email, r.name
+                GROUP BY u.id, u.nickname, u.email, up.first_name, up.last_name, r.name
                 ORDER BY COUNT(b.id) DESC, u.nickname
-                LIMIT 15
+                LIMIT 20
             `);
             console.log('Creadores de contenido found:', profesoresCreadores.rows.length);
         } catch (profError) {
@@ -123,8 +125,8 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                     u.id,
                     u.nickname,
                     COALESCE(u.email, 'Sin email') as email,
-                    '' as first_name,
-                    '' as last_name,
+                    COALESCE(up.first_name, '') as first_name,
+                    COALESCE(up.last_name, '') as last_name,
                     0 as assigned_admin_id,
                     'Sin asignar' as assigned_admin_nickname,
                     COALESCE(
@@ -150,8 +152,8 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                 LEFT JOIN blocks b ON u.id = b.creator_id
                 WHERE (r.name IS NULL OR r.name = 'usuario') 
                   AND b.id IS NULL
-                ORDER BY u.nickname
-                LIMIT 25
+                ORDER BY COALESCE(up.first_name, u.nickname)
+                LIMIT 30
             `);
             console.log('Usuarios regulares found:', usuarios.rows.length);
         } catch (userError) {
