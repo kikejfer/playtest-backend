@@ -8,6 +8,69 @@ const pool = new Pool({
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
+// Panel de Administrador Principal - Versión de EMERGENCIA ULTRA SIMPLE
+router.get('/admin-principal-panel-emergency', authenticateToken, async (req, res) => {
+    try {
+        console.log('EMERGENCY: Simple admin panel request from user:', req.user.id);
+        
+        // Solo consultas básicas sin estadísticas
+        const allUsers = await pool.query('SELECT id, nickname, COALESCE(email, \'Sin email\') as email FROM users ORDER BY id');
+        
+        const usersWithBlocks = await pool.query(`
+            SELECT DISTINCT u.id, u.nickname, COALESCE(u.email, 'Sin email') as email
+            FROM users u 
+            INNER JOIN blocks b ON u.id = b.creator_id
+        `);
+        
+        const blockCreatorIds = new Set(usersWithBlocks.rows.map(u => u.id));
+        
+        // AdminPrincipal como administrador
+        const adminSecundarios = allUsers.rows
+            .filter(user => user.nickname === 'AdminPrincipal')
+            .map(user => ({
+                id: user.id,
+                nickname: user.nickname,
+                email: user.email,
+                first_name: '', last_name: '',
+                assigned_creators_count: 0, total_blocks_assigned: 0, total_questions_assigned: 0, luminarias: 0,
+                role_name: 'administrador_principal'
+            }));
+
+        // Usuarios con bloques como creadores (SIN estadísticas por ahora)
+        const profesoresCreadores = usersWithBlocks.rows
+            .filter(user => user.nickname !== 'AdminPrincipal')
+            .map(user => ({
+                id: user.id, nickname: user.nickname, email: user.email,
+                first_name: '', last_name: '', assigned_admin_id: 0, assigned_admin_nickname: 'Sin asignar',
+                blocks_created: 1, total_questions: 0, total_users_blocks: 0,
+                luminarias_actuales: 0, luminarias_ganadas: 0, luminarias_gastadas: 0, luminarias_abonadas: 0, luminarias_compradas: 0,
+                role_name: 'creador_contenido'
+            }));
+
+        // Usuarios sin bloques
+        const usuarios = allUsers.rows
+            .filter(user => user.nickname !== 'AdminPrincipal' && !blockCreatorIds.has(user.id))
+            .map(user => ({
+                id: user.id, nickname: user.nickname, email: user.email,
+                first_name: '', last_name: '', assigned_admin_id: 0, assigned_admin_nickname: 'Sin asignar', blocks_loaded: 0,
+                luminarias_actuales: 0, luminarias_ganadas: 0, luminarias_gastadas: 0, luminarias_abonadas: 0, luminarias_compradas: 0,
+                role_name: 'usuario'
+            }));
+
+        res.json({
+            adminSecundarios: adminSecundarios,
+            profesoresCreadores: profesoresCreadores,
+            usuarios: usuarios,
+            availableAdmins: allUsers.rows,
+            emergency_version: true
+        });
+
+    } catch (error) {
+        console.error('Error in emergency admin panel:', error);
+        res.status(500).json({ error: 'Error interno del servidor', details: error.message });
+    }
+});
+
 // Panel de Administrador Principal - Versión Simplificada que FUNCIONA
 router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
     try {
