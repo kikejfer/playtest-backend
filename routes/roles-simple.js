@@ -25,19 +25,48 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
             ORDER BY u.id
         `);
 
-        // Obtener usuarios con bloques y total de preguntas
+        // Obtener usuarios con bloques (consulta ultra simple)
         const usersWithBlocks = await pool.query(`
             SELECT 
                 u.id, 
                 u.nickname, 
                 COALESCE(u.email, 'Sin email') as email, 
-                COUNT(DISTINCT b.id) as blocks_count,
-                COALESCE(SUM(b.total_questions), 0) as total_questions
+                COUNT(b.id) as blocks_count
             FROM users u 
             INNER JOIN blocks b ON u.id = b.creator_id
             GROUP BY u.id, u.nickname, u.email
-            ORDER BY COUNT(DISTINCT b.id) DESC
+            ORDER BY COUNT(b.id) DESC
         `);
+
+        // Obtener estadísticas adicionales por separado
+        const questionStats = await pool.query(`
+            SELECT 
+                b.creator_id,
+                COUNT(q.id) as question_count
+            FROM blocks b
+            LEFT JOIN questions q ON b.id = q.block_id
+            GROUP BY b.creator_id
+        `);
+
+        const userStats = await pool.query(`
+            SELECT 
+                b.creator_id,
+                COUNT(DISTINCT g.user_id) as user_count
+            FROM blocks b
+            LEFT JOIN games g ON b.id = g.block_id
+            GROUP BY b.creator_id
+        `);
+
+        // Crear mapas para estadísticas
+        const questionMap = new Map();
+        questionStats.rows.forEach(row => {
+            questionMap.set(row.creator_id, parseInt(row.question_count) || 0);
+        });
+
+        const userMap = new Map();
+        userStats.rows.forEach(row => {
+            userMap.set(row.creator_id, parseInt(row.user_count) || 0);
+        });
 
         console.log('Simple queries executed successfully');
         console.log('All users count:', allUsers.rows.length);
@@ -74,8 +103,8 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                 assigned_admin_id: 0,
                 assigned_admin_nickname: 'Sin asignar',
                 blocks_created: parseInt(user.blocks_count) || 0,
-                total_questions: parseInt(user.total_questions) || 0,
-                total_users_blocks: 0,
+                total_questions: questionMap.get(user.id) || 0,
+                total_users_blocks: userMap.get(user.id) || 0,
                 luminarias_actuales: 0,
                 luminarias_ganadas: 0,
                 luminarias_gastadas: 0,
@@ -311,14 +340,21 @@ router.get('/user-blocks/:userId', authenticateToken, async (req, res) => {
                 title,
                 description,
                 topic,
-                COALESCE(total_questions, 0) as total_questions,
-                COALESCE(total_users, 0) as total_users,
                 is_public,
                 created_at
             FROM blocks 
             WHERE creator_id = $1 
             ORDER BY created_at DESC
         `, [userId]);
+
+        // Obtener estadísticas por separado para cada bloque
+        for (let block of blocks.rows) {
+            const questionCount = await pool.query('SELECT COUNT(*) as count FROM questions WHERE block_id = $1', [block.id]);
+            const userCount = await pool.query('SELECT COUNT(DISTINCT user_id) as count FROM games WHERE block_id = $1', [block.id]);
+            
+            block.total_questions = parseInt(questionCount.rows[0]?.count) || 0;
+            block.total_users = parseInt(userCount.rows[0]?.count) || 0;
+        }
         
         res.json({
             blocks: blocks.rows,
