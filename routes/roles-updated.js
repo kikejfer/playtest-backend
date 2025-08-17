@@ -34,24 +34,19 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
     try {
         console.log('Admin panel request from user:', req.user.id);
         
-        // Verificar que es AdminPrincipal específicamente (más permisivo para testing)
-        let adminCheck;
-        try {
-            adminCheck = await pool.query(`
-                SELECT 1 FROM user_roles ur
-                JOIN roles r ON ur.role_id = r.id
-                WHERE ur.user_id = $1 AND r.name IN ('administrador_principal', 'administrador_secundario')
-            `, [req.user.id]);
-            console.log('Admin check result:', adminCheck.rows.length);
-        } catch (roleError) {
-            console.error('Error checking admin role:', roleError);
-            // Si falla el check de rol, continuar anyway para debugging
+        // Verificar que es AdminPrincipal específicamente
+        const adminCheck = await pool.query(`
+            SELECT r.name as role_name FROM user_roles ur
+            JOIN roles r ON ur.role_id = r.id
+            WHERE ur.user_id = $1 AND r.name IN ('administrador_principal', 'administrador_secundario')
+        `, [req.user.id]);
+
+        if (adminCheck.rows.length === 0) {
+            return res.status(403).json({ error: 'Se requieren permisos administrativos para acceder a este panel' });
         }
 
-        // Comentamos temporalmente la verificación de permisos para debugging
-        // if (adminCheck.rows.length === 0) {
-        //     return res.status(403).json({ error: 'Se requieren permisos administrativos para acceder a este panel' });
-        // }
+        const userRole = adminCheck.rows[0].role_name;
+        console.log('User role:', userRole, 'accessing admin panel');
 
         // Sección 1: Administradores (Principal y Secundarios)
         console.log('Fetching administradores...');
@@ -132,7 +127,16 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                     '' as last_name,
                     0 as assigned_admin_id,
                     'Sin asignar' as assigned_admin_nickname,
-                    0 as blocks_loaded,
+                    COALESCE(
+                        CASE 
+                            WHEN up.loaded_blocks IS NOT NULL THEN 
+                                CASE 
+                                    WHEN jsonb_typeof(up.loaded_blocks) = 'array' THEN jsonb_array_length(up.loaded_blocks)
+                                    ELSE 0
+                                END
+                            ELSE 0
+                        END, 
+                    0) as blocks_loaded,
                     0 as luminarias_actuales,
                     0 as luminarias_ganadas,
                     0 as luminarias_gastadas,
@@ -140,6 +144,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                     0 as luminarias_compradas,
                     COALESCE(r.name, 'usuario') as role_name
                 FROM users u
+                LEFT JOIN user_profiles up ON u.id = up.user_id
                 LEFT JOIN user_roles ur ON u.id = ur.user_id
                 LEFT JOIN roles r ON ur.role_id = r.id
                 LEFT JOIN blocks b ON u.id = b.creator_id

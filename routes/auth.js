@@ -20,14 +20,20 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'AdminPrincipal debe usar la contraseña por defecto inicial' });
     }
 
-    // Check if user already exists
+    // Check if user already exists (nickname or email)
     const existingUser = await pool.query(
-      'SELECT id FROM users WHERE nickname = $1',
-      [nickname]
+      'SELECT id, nickname, email FROM users WHERE nickname = $1 OR email = $2',
+      [nickname, email]
     );
 
     if (existingUser.rows.length > 0) {
-      return res.status(400).json({ error: 'User already exists' });
+      const existing = existingUser.rows[0];
+      if (existing.nickname === nickname) {
+        return res.status(400).json({ error: 'El nickname ya está en uso' });
+      }
+      if (existing.email === email) {
+        return res.status(400).json({ error: 'El email ya está registrado' });
+      }
     }
 
     // Hash password
