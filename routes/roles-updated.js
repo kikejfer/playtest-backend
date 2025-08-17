@@ -635,4 +635,82 @@ router.get('/debug-user-info', authenticateToken, async (req, res) => {
     }
 });
 
+// Endpoint para crear tablas de roles si no existen
+router.post('/setup-roles', authenticateToken, async (req, res) => {
+    try {
+        console.log('Setting up roles tables...');
+        
+        // Crear tabla roles
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS roles (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(100) UNIQUE NOT NULL,
+                description TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        
+        // Crear tabla user_roles
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS user_roles (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                role_id INTEGER REFERENCES roles(id) ON DELETE CASCADE,
+                assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, role_id)
+            )
+        `);
+        
+        // Insertar roles básicos si no existen
+        const roleInserts = [
+            ['administrador_principal', 'Administrador principal del sistema con todos los permisos'],
+            ['administrador_secundario', 'Administrador secundario con permisos limitados'],
+            ['profesor', 'Profesor con acceso a herramientas educativas'],
+            ['creador_contenido', 'Creador de contenido y bloques'],
+            ['usuario', 'Usuario regular del sistema']
+        ];
+        
+        for (const [name, description] of roleInserts) {
+            await pool.query(
+                'INSERT INTO roles (name, description) VALUES ($1, $2) ON CONFLICT (name) DO NOTHING',
+                [name, description]
+            );
+        }
+        
+        // Asignar rol de administrador principal al usuario actual
+        const adminRoleResult = await pool.query('SELECT id FROM roles WHERE name = $1', ['administrador_principal']);
+        if (adminRoleResult.rows.length > 0) {
+            await pool.query(
+                'INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT (user_id, role_id) DO NOTHING',
+                [req.user.id, adminRoleResult.rows[0].id]
+            );
+        }
+        
+        // Verificar el setup
+        const rolesCount = await pool.query('SELECT COUNT(*) as count FROM roles');
+        const userRoleCheck = await pool.query(`
+            SELECT r.name FROM user_roles ur 
+            JOIN roles r ON ur.role_id = r.id 
+            WHERE ur.user_id = $1
+        `, [req.user.id]);
+        
+        res.json({
+            success: true,
+            message: 'Tablas de roles creadas exitosamente',
+            roles_created: parseInt(rolesCount.rows[0].count),
+            user_roles: userRoleCheck.rows.map(r => r.name),
+            user_id: req.user.id,
+            timestamp: new Date().toISOString()
+        });
+        
+    } catch (error) {
+        console.error('Error setting up roles:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Error creando tablas de roles',
+            details: error.message
+        });
+    }
+});
+
 module.exports = router;
