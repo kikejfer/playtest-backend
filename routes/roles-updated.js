@@ -713,4 +713,110 @@ router.post('/setup-roles', authenticateToken, async (req, res) => {
     }
 });
 
+// Endpoint para buscar usuarios por nickname para añadir administradores
+router.get('/search-users', authenticateToken, async (req, res) => {
+    try {
+        const { q: searchQuery } = req.query;
+        
+        if (!searchQuery || searchQuery.length < 2) {
+            return res.json({ users: [] });
+        }
+        
+        console.log('Searching users with query:', searchQuery);
+        
+        // Buscar usuarios que coincidan con el nickname
+        const searchResults = await pool.query(`
+            SELECT DISTINCT
+                u.id,
+                u.nickname,
+                u.email,
+                COALESCE(r.name, 'sin_rol') as current_role
+            FROM users u
+            LEFT JOIN user_roles ur ON u.id = ur.user_id
+            LEFT JOIN roles r ON ur.role_id = r.id
+            WHERE LOWER(u.nickname) LIKE LOWER($1)
+            ORDER BY u.nickname
+            LIMIT 10
+        `, [`%${searchQuery}%`]);
+        
+        console.log('Search results found:', searchResults.rows.length);
+        
+        res.json({
+            users: searchResults.rows,
+            query: searchQuery,
+            count: searchResults.rows.length
+        });
+        
+    } catch (error) {
+        console.error('Error searching users:', error);
+        res.status(500).json({ 
+            error: 'Error buscando usuarios',
+            details: error.message 
+        });
+    }
+});
+
+// Endpoint para añadir administrador secundario
+router.post('/add-admin-secundario', authenticateToken, async (req, res) => {
+    try {
+        const { user_id, nickname } = req.body;
+        
+        if (!user_id) {
+            return res.status(400).json({ error: 'user_id es requerido' });
+        }
+        
+        console.log('Adding admin secundario role to user:', user_id, nickname);
+        
+        // Verificar que el usuario existe
+        const userCheck = await pool.query('SELECT id, nickname, email FROM users WHERE id = $1', [user_id]);
+        if (userCheck.rows.length === 0) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+        
+        // Obtener el rol de administrador secundario
+        const roleResult = await pool.query('SELECT id FROM roles WHERE name = $1', ['administrador_secundario']);
+        if (roleResult.rows.length === 0) {
+            return res.status(500).json({ error: 'Rol administrador_secundario no encontrado' });
+        }
+        
+        const roleId = roleResult.rows[0].id;
+        
+        // Verificar si ya tiene el rol
+        const existingRole = await pool.query(
+            'SELECT 1 FROM user_roles WHERE user_id = $1 AND role_id = $2',
+            [user_id, roleId]
+        );
+        
+        if (existingRole.rows.length > 0) {
+            return res.status(400).json({ error: 'El usuario ya es administrador secundario' });
+        }
+        
+        // Asignar el rol
+        await pool.query(
+            'INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)',
+            [user_id, roleId]
+        );
+        
+        const user = userCheck.rows[0];
+        
+        res.json({
+            success: true,
+            message: `${user.nickname} fue agregado como administrador secundario`,
+            user: {
+                id: user.id,
+                nickname: user.nickname,
+                email: user.email,
+                role: 'administrador_secundario'
+            }
+        });
+        
+    } catch (error) {
+        console.error('Error adding admin secundario:', error);
+        res.status(500).json({ 
+            error: 'Error añadiendo administrador secundario',
+            details: error.message 
+        });
+    }
+});
+
 module.exports = router;
