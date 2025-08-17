@@ -25,13 +25,18 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
             ORDER BY u.id
         `);
 
-        // Obtener usuarios con bloques con consulta simple
+        // Obtener usuarios con bloques y total de preguntas
         const usersWithBlocks = await pool.query(`
-            SELECT DISTINCT u.id, u.nickname, COALESCE(u.email, 'Sin email') as email, COUNT(b.id) as blocks_count
+            SELECT 
+                u.id, 
+                u.nickname, 
+                COALESCE(u.email, 'Sin email') as email, 
+                COUNT(DISTINCT b.id) as blocks_count,
+                COALESCE(SUM(b.total_questions), 0) as total_questions
             FROM users u 
             INNER JOIN blocks b ON u.id = b.creator_id
             GROUP BY u.id, u.nickname, u.email
-            ORDER BY COUNT(b.id) DESC
+            ORDER BY COUNT(DISTINCT b.id) DESC
         `);
 
         console.log('Simple queries executed successfully');
@@ -69,7 +74,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                 assigned_admin_id: 0,
                 assigned_admin_nickname: 'Sin asignar',
                 blocks_created: parseInt(user.blocks_count) || 0,
-                total_questions: 0,
+                total_questions: parseInt(user.total_questions) || 0,
                 total_users_blocks: 0,
                 luminarias_actuales: 0,
                 luminarias_ganadas: 0,
@@ -197,6 +202,191 @@ router.delete('/delete-user/:userId', authenticateToken, async (req, res) => {
         console.error('Error deleting user:', error);
         res.status(500).json({ 
             error: 'Error borrando usuario',
+            details: error.message 
+        });
+    }
+});
+
+// Buscar usuarios por nickname
+router.get('/search-users', authenticateToken, async (req, res) => {
+    try {
+        const { q } = req.query;
+        
+        if (!q || q.trim().length === 0) {
+            return res.json({ users: [] });
+        }
+        
+        const searchTerm = `%${q.trim()}%`;
+        const users = await pool.query(`
+            SELECT id, nickname, COALESCE(email, 'Sin email') as email
+            FROM users 
+            WHERE nickname ILIKE $1 
+            ORDER BY nickname 
+            LIMIT 10
+        `, [searchTerm]);
+        
+        res.json({
+            users: users.rows,
+            count: users.rows.length
+        });
+        
+    } catch (error) {
+        console.error('Error searching users:', error);
+        res.status(500).json({ 
+            error: 'Error buscando usuarios',
+            details: error.message 
+        });
+    }
+});
+
+// Asignar administrador secundario
+router.post('/add-admin-secundario', authenticateToken, async (req, res) => {
+    try {
+        const { userId } = req.body;
+        
+        if (!userId) {
+            return res.status(400).json({ error: 'ID de usuario requerido' });
+        }
+        
+        // Verificar que el usuario existe
+        const userCheck = await pool.query('SELECT id, nickname FROM users WHERE id = $1', [userId]);
+        if (userCheck.rows.length === 0) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+        
+        const user = userCheck.rows[0];
+        
+        // Verificar que no es AdminPrincipal
+        if (user.nickname === 'AdminPrincipal') {
+            return res.status(400).json({ error: 'AdminPrincipal no puede ser asignado como administrador secundario' });
+        }
+        
+        // Buscar el rol de administrador_secundario
+        const roleCheck = await pool.query('SELECT id FROM roles WHERE name = $1', ['administrador_secundario']);
+        if (roleCheck.rows.length === 0) {
+            return res.status(500).json({ error: 'Rol administrador_secundario no existe' });
+        }
+        
+        const roleId = roleCheck.rows[0].id;
+        
+        // Verificar si ya tiene el rol
+        const existingRole = await pool.query(
+            'SELECT id FROM user_roles WHERE user_id = $1 AND role_id = $2', 
+            [userId, roleId]
+        );
+        
+        if (existingRole.rows.length > 0) {
+            return res.status(400).json({ error: 'El usuario ya es administrador secundario' });
+        }
+        
+        // Asignar el rol
+        await pool.query(
+            'INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)', 
+            [userId, roleId]
+        );
+        
+        res.json({
+            success: true,
+            message: `${user.nickname} asignado como administrador secundario exitosamente`,
+            user: user
+        });
+        
+    } catch (error) {
+        console.error('Error adding admin secundario:', error);
+        res.status(500).json({ 
+            error: 'Error asignando administrador secundario',
+            details: error.message 
+        });
+    }
+});
+
+// Obtener bloques de un usuario
+router.get('/user-blocks/:userId', authenticateToken, async (req, res) => {
+    try {
+        const { userId } = req.params;
+        
+        const blocks = await pool.query(`
+            SELECT 
+                id,
+                title,
+                description,
+                topic,
+                COALESCE(total_questions, 0) as total_questions,
+                COALESCE(total_users, 0) as total_users,
+                is_public,
+                created_at
+            FROM blocks 
+            WHERE creator_id = $1 
+            ORDER BY created_at DESC
+        `, [userId]);
+        
+        res.json({
+            blocks: blocks.rows,
+            count: blocks.rows.length
+        });
+        
+    } catch (error) {
+        console.error('Error getting user blocks:', error);
+        res.status(500).json({ 
+            error: 'Error obteniendo bloques del usuario',
+            details: error.message 
+        });
+    }
+});
+
+// Obtener temas de un bloque
+router.get('/block-topics/:blockId', authenticateToken, async (req, res) => {
+    try {
+        const { blockId } = req.params;
+        
+        const topics = await pool.query(`
+            SELECT DISTINCT topic
+            FROM questions 
+            WHERE block_id = $1 AND topic IS NOT NULL
+            ORDER BY topic
+        `, [blockId]);
+        
+        res.json({
+            topics: topics.rows.map(row => row.topic),
+            count: topics.rows.length
+        });
+        
+    } catch (error) {
+        console.error('Error getting block topics:', error);
+        res.status(500).json({ 
+            error: 'Error obteniendo temas del bloque',
+            details: error.message 
+        });
+    }
+});
+
+// Obtener preguntas de un tema específico
+router.get('/topic-questions/:blockId/:topic', authenticateToken, async (req, res) => {
+    try {
+        const { blockId, topic } = req.params;
+        
+        const questions = await pool.query(`
+            SELECT 
+                id,
+                question_text,
+                question_type,
+                difficulty_level,
+                created_at
+            FROM questions 
+            WHERE block_id = $1 AND topic = $2
+            ORDER BY created_at DESC
+        `, [blockId, topic]);
+        
+        res.json({
+            questions: questions.rows,
+            count: questions.rows.length,
+            topic: topic
+        });
+        
+    } catch (error) {
+        console.error('Error getting topic questions:', error);
+        res.status(500).json({ 
+            error: 'Error obteniendo preguntas del tema',
             details: error.message 
         });
     }
