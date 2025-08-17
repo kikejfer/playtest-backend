@@ -129,16 +129,11 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                     COALESCE(up.last_name, '') as last_name,
                     0 as assigned_admin_id,
                     'Sin asignar' as assigned_admin_nickname,
-                    COALESCE(
-                        CASE 
-                            WHEN up.loaded_blocks IS NOT NULL THEN 
-                                CASE 
-                                    WHEN jsonb_typeof(up.loaded_blocks) = 'array' THEN jsonb_array_length(up.loaded_blocks)
-                                    ELSE 0
-                                END
-                            ELSE 0
-                        END, 
-                    0) as blocks_loaded,
+                    COALESCE((
+                        SELECT COUNT(*) 
+                        FROM blocks b 
+                        WHERE b.creator_id = u.id
+                    ), 0) as blocks_loaded,
                     0 as luminarias_actuales,
                     0 as luminarias_ganadas,
                     0 as luminarias_gastadas,
@@ -149,9 +144,13 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                 LEFT JOIN user_profiles up ON u.id = up.user_id
                 LEFT JOIN user_roles ur ON u.id = ur.user_id
                 LEFT JOIN roles r ON ur.role_id = r.id
-                LEFT JOIN blocks b ON u.id = b.creator_id
                 WHERE (r.name IS NULL OR r.name = 'usuario') 
-                  AND b.id IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM user_roles ur2 
+                      JOIN roles r2 ON ur2.role_id = r2.id 
+                      WHERE ur2.user_id = u.id 
+                      AND r2.name IN ('administrador_principal', 'administrador_secundario')
+                  )
                 ORDER BY COALESCE(up.first_name, u.nickname)
                 LIMIT 30
             `);
@@ -816,6 +815,170 @@ router.post('/add-admin-secundario', authenticateToken, async (req, res) => {
         console.error('Error adding admin secundario:', error);
         res.status(500).json({ 
             error: 'Error añadiendo administrador secundario',
+            details: error.message 
+        });
+    }
+});
+
+// Debug endpoint temporal para ver qué usuarios existen
+router.get('/debug-users', authenticateToken, async (req, res) => {
+    try {
+        // Usuarios básicos
+        const allUsers = await pool.query('SELECT id, nickname, email FROM users ORDER BY id LIMIT 10');
+        
+        // Usuarios con roles
+        const usersWithRoles = await pool.query(`
+            SELECT u.id, u.nickname, u.email, r.name as role_name
+            FROM users u
+            LEFT JOIN user_roles ur ON u.id = ur.user_id
+            LEFT JOIN roles r ON ur.role_id = r.id
+            ORDER BY u.id LIMIT 10
+        `);
+        
+        // Usuarios con bloques
+        const usersWithBlocks = await pool.query(`
+            SELECT u.id, u.nickname, COUNT(b.id) as block_count
+            FROM users u
+            LEFT JOIN blocks b ON u.id = b.creator_id
+            GROUP BY u.id, u.nickname
+            HAVING COUNT(b.id) > 0
+            ORDER BY COUNT(b.id) DESC LIMIT 10
+        `);
+        
+        // Check user_profiles
+        const profilesCount = await pool.query('SELECT COUNT(*) as count FROM user_profiles');
+        
+        res.json({
+            all_users: allUsers.rows,
+            users_with_roles: usersWithRoles.rows,
+            users_with_blocks: usersWithBlocks.rows,
+            profiles_count: profilesCount.rows[0].count,
+            timestamp: new Date().toISOString()
+        });
+        
+    } catch (error) {
+        console.error('Debug users error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Endpoint para borrar usuario completamente
+router.delete('/delete-user/:userId', authenticateToken, async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const adminUserId = req.user.id;
+        
+        console.log(`Admin ${adminUserId} attempting to delete user ${userId}`);
+        
+        // Verificar que es administrador
+        const adminCheck = await pool.query(`
+            SELECT r.name FROM user_roles ur
+            JOIN roles r ON ur.role_id = r.id
+            WHERE ur.user_id = $1 AND r.name IN ('administrador_principal', 'administrador_secundario')
+        `, [adminUserId]);
+
+        if (adminCheck.rows.length === 0) {
+            return res.status(403).json({ error: 'No tienes permisos para borrar usuarios' });
+        }
+
+        // Verificar que el usuario existe
+        const userCheck = await pool.query('SELECT nickname FROM users WHERE id = $1', [userId]);
+        if (userCheck.rows.length === 0) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+
+        const nickname = userCheck.rows[0].nickname;
+        
+        // Evitar que se borre a sí mismo
+        if (parseInt(userId) === adminUserId) {
+            return res.status(400).json({ error: 'No puedes borrar tu propia cuenta' });
+        }
+
+        const deletedData = [];
+        let totalDeleted = 0;
+
+        // 1. Borrar preguntas de bloques del usuario
+        const deletedQuestions = await pool.query(`
+            DELETE FROM questions WHERE block_id IN (
+                SELECT id FROM blocks WHERE creator_id = $1
+            )
+        `, [userId]);
+        if (deletedQuestions.rowCount > 0) {
+            deletedData.push(`✗ ${deletedQuestions.rowCount} preguntas`);
+            totalDeleted += deletedQuestions.rowCount;
+        }
+
+        // 2. Borrar bloques del usuario
+        const deletedBlocks = await pool.query('DELETE FROM blocks WHERE creator_id = $1', [userId]);
+        if (deletedBlocks.rowCount > 0) {
+            deletedData.push(`✗ ${deletedBlocks.rowCount} bloques`);
+            totalDeleted += deletedBlocks.rowCount;
+        }
+
+        // 3. Borrar respuestas del usuario
+        const deletedAnswers = await pool.query('DELETE FROM user_answers WHERE user_id = $1', [userId]);
+        if (deletedAnswers.rowCount > 0) {
+            deletedData.push(`✗ ${deletedAnswers.rowCount} respuestas`);
+            totalDeleted += deletedAnswers.rowCount;
+        }
+
+        // 4. Borrar partidas del usuario
+        const deletedGames = await pool.query('DELETE FROM games WHERE user_id = $1', [userId]);
+        if (deletedGames.rowCount > 0) {
+            deletedData.push(`✗ ${deletedGames.rowCount} partidas`);
+            totalDeleted += deletedGames.rowCount;
+        }
+
+        // 5. Borrar perfil del usuario
+        const deletedProfile = await pool.query('DELETE FROM user_profiles WHERE user_id = $1', [userId]);
+        if (deletedProfile.rowCount > 0) {
+            deletedData.push(`✗ Perfil de usuario`);
+            totalDeleted += deletedProfile.rowCount;
+        }
+
+        // 6. Borrar roles del usuario
+        const deletedRoles = await pool.query('DELETE FROM user_roles WHERE user_id = $1', [userId]);
+        if (deletedRoles.rowCount > 0) {
+            deletedData.push(`✗ ${deletedRoles.rowCount} asignaciones de rol`);
+            totalDeleted += deletedRoles.rowCount;
+        }
+
+        // 7. Borrar luminarias del usuario
+        const deletedLuminarias = await pool.query('DELETE FROM user_luminarias WHERE user_id = $1', [userId]);
+        if (deletedLuminarias.rowCount > 0) {
+            deletedData.push(`✗ Registro de luminarias`);
+            totalDeleted += deletedLuminarias.rowCount;
+        }
+
+        // 8. Borrar asignaciones administrativas
+        const deletedAssignments = await pool.query('DELETE FROM admin_assignments WHERE user_id = $1 OR admin_id = $1', [userId]);
+        if (deletedAssignments.rowCount > 0) {
+            deletedData.push(`✗ ${deletedAssignments.rowCount} asignaciones administrativas`);
+            totalDeleted += deletedAssignments.rowCount;
+        }
+
+        // 9. Finalmente, borrar el usuario
+        const deletedUser = await pool.query('DELETE FROM users WHERE id = $1', [userId]);
+        if (deletedUser.rowCount > 0) {
+            deletedData.push(`✗ Cuenta de usuario`);
+            totalDeleted += deletedUser.rowCount;
+        }
+
+        console.log(`User ${nickname} (ID: ${userId}) completely deleted by admin ${adminUserId}`);
+
+        res.json({
+            success: true,
+            message: `Usuario "${nickname}" borrado completamente`,
+            deleted_data: deletedData,
+            total_deleted: totalDeleted,
+            deleted_by: req.user.nickname || `Admin ID: ${adminUserId}`,
+            timestamp: new Date().toISOString()
+        });
+
+    } catch (error) {
+        console.error('Error deleting user:', error);
+        res.status(500).json({ 
+            error: 'Error borrando usuario',
             details: error.message 
         });
     }
