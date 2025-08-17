@@ -134,52 +134,58 @@ router.delete('/delete-user/:userId', authenticateToken, async (req, res) => {
             return res.status(403).json({ error: 'No se puede borrar AdminPrincipal' });
         }
         
-        // Borrar en orden para evitar errores de clave foránea
+        // Borrar en orden para evitar errores de clave foránea - solo tablas que existen
         const deletedData = [];
         
-        // 1. Borrar respuestas de usuario
-        const deletedAnswers = await pool.query('DELETE FROM user_answers WHERE user_id = $1', [userId]);
-        if (deletedAnswers.rowCount > 0) {
-            deletedData.push(`${deletedAnswers.rowCount} respuestas de usuario`);
-        }
+        // 1. Borrar de game_players primero (si existe)
+        try {
+            const deletedGamePlayers = await pool.query('DELETE FROM game_players WHERE user_id = $1', [userId]);
+            if (deletedGamePlayers.rowCount > 0) {
+                deletedData.push(`${deletedGamePlayers.rowCount} participaciones en juegos`);
+            }
+        } catch (e) { /* Tabla no existe */ }
         
-        // 2. Borrar progreso de juegos
-        const deletedProgress = await pool.query('DELETE FROM user_game_progress WHERE user_id = $1', [userId]);
-        if (deletedProgress.rowCount > 0) {
-            deletedData.push(`${deletedProgress.rowCount} registros de progreso`);
-        }
+        // 2. Borrar juegos creados por el usuario (usando created_by)
+        try {
+            const deletedGames = await pool.query('DELETE FROM games WHERE created_by = $1', [userId]);
+            if (deletedGames.rowCount > 0) {
+                deletedData.push(`${deletedGames.rowCount} juegos creados`);
+            }
+        } catch (e) { /* Tabla no existe */ }
         
-        // 3. Borrar juegos
-        const deletedGames = await pool.query('DELETE FROM games WHERE user_id = $1', [userId]);
-        if (deletedGames.rowCount > 0) {
-            deletedData.push(`${deletedGames.rowCount} juegos`);
-        }
+        // 3. Borrar preguntas creadas por el usuario
+        try {
+            const deletedQuestions = await pool.query('DELETE FROM questions WHERE creator_id = $1', [userId]);
+            if (deletedQuestions.rowCount > 0) {
+                deletedData.push(`${deletedQuestions.rowCount} preguntas creadas`);
+            }
+        } catch (e) { /* Tabla no existe */ }
         
-        // 4. Borrar preguntas creadas por el usuario
-        const deletedQuestions = await pool.query('DELETE FROM questions WHERE creator_id = $1', [userId]);
-        if (deletedQuestions.rowCount > 0) {
-            deletedData.push(`${deletedQuestions.rowCount} preguntas creadas`);
-        }
+        // 4. Borrar bloques creados por el usuario
+        try {
+            const deletedBlocks = await pool.query('DELETE FROM blocks WHERE creator_id = $1', [userId]);
+            if (deletedBlocks.rowCount > 0) {
+                deletedData.push(`${deletedBlocks.rowCount} bloques creados`);
+            }
+        } catch (e) { /* Tabla no existe */ }
         
-        // 5. Borrar bloques creados por el usuario
-        const deletedBlocks = await pool.query('DELETE FROM blocks WHERE creator_id = $1', [userId]);
-        if (deletedBlocks.rowCount > 0) {
-            deletedData.push(`${deletedBlocks.rowCount} bloques creados`);
-        }
+        // 5. Borrar roles de usuario
+        try {
+            const deletedRoles = await pool.query('DELETE FROM user_roles WHERE user_id = $1', [userId]);
+            if (deletedRoles.rowCount > 0) {
+                deletedData.push(`${deletedRoles.rowCount} roles asignados`);
+            }
+        } catch (e) { /* Tabla no existe */ }
         
-        // 6. Borrar roles de usuario
-        const deletedRoles = await pool.query('DELETE FROM user_roles WHERE user_id = $1', [userId]);
-        if (deletedRoles.rowCount > 0) {
-            deletedData.push(`${deletedRoles.rowCount} roles asignados`);
-        }
+        // 6. Borrar perfil de usuario
+        try {
+            const deletedProfile = await pool.query('DELETE FROM user_profiles WHERE user_id = $1', [userId]);
+            if (deletedProfile.rowCount > 0) {
+                deletedData.push(`Perfil de usuario`);
+            }
+        } catch (e) { /* Tabla no existe */ }
         
-        // 7. Borrar perfil de usuario
-        const deletedProfile = await pool.query('DELETE FROM user_profiles WHERE user_id = $1', [userId]);
-        if (deletedProfile.rowCount > 0) {
-            deletedData.push(`Perfil de usuario`);
-        }
-        
-        // 8. Finalmente borrar el usuario
+        // 7. Finalmente borrar el usuario
         const deletedUser = await pool.query('DELETE FROM users WHERE id = $1', [userId]);
         deletedData.push(`Cuenta de usuario: ${user.nickname}`);
         
