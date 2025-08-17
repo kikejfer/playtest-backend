@@ -57,8 +57,8 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                     u.id,
                     u.nickname,
                     COALESCE(u.email, 'Sin email') as email,
-                    COALESCE(up.first_name, '') as first_name,
-                    COALESCE(up.last_name, '') as last_name,
+                    '' as first_name,
+                    '' as last_name,
                     0 as assigned_creators_count,
                     0 as total_blocks_assigned,
                     0 as total_questions_assigned,
@@ -87,8 +87,8 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                     u.id,
                     u.nickname,
                     COALESCE(u.email, 'Sin email') as email,
-                    COALESCE(up.first_name, '') as first_name,
-                    COALESCE(up.last_name, '') as last_name,
+                    '' as first_name,
+                    '' as last_name,
                     0 as assigned_admin_id,
                     'Sin asignar' as assigned_admin_nickname,
                     COUNT(b.id) as blocks_created,
@@ -106,7 +106,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                 LEFT JOIN user_roles ur ON u.id = ur.user_id
                 LEFT JOIN roles r ON ur.role_id = r.id
                 WHERE b.id IS NOT NULL AND u.nickname != 'AdminPrincipal'
-                GROUP BY u.id, u.nickname, u.email, up.first_name, up.last_name, r.name
+                GROUP BY u.id, u.nickname, u.email, r.name
                 ORDER BY COUNT(b.id) DESC, u.nickname
                 LIMIT 20
             `);
@@ -125,8 +125,8 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                     u.id,
                     u.nickname,
                     COALESCE(u.email, 'Sin email') as email,
-                    COALESCE(up.first_name, '') as first_name,
-                    COALESCE(up.last_name, '') as last_name,
+                    '' as first_name,
+                    '' as last_name,
                     0 as assigned_admin_id,
                     'Sin asignar' as assigned_admin_nickname,
                     COALESCE((
@@ -145,7 +145,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                 LEFT JOIN user_roles ur ON u.id = ur.user_id
                 LEFT JOIN roles r ON ur.role_id = r.id
                 WHERE u.nickname != 'AdminPrincipal'
-                ORDER BY COALESCE(up.first_name, u.nickname)
+                ORDER BY u.nickname
                 LIMIT 30
             `);
             console.log('Usuarios regulares found:', usuarios.rows.length);
@@ -201,8 +201,8 @@ router.get('/admin-secundario-panel', authenticateToken, requireAdminRole, async
             SELECT 
                 u.id,
                 u.nickname,
-                up.first_name,
-                up.last_name,
+                '' as first_name,
+                '' as last_name,
                 u.email,
                 COUNT(DISTINCT b.id) as blocks_created,
                 COALESCE(SUM(b.total_questions), 0) as total_questions,
@@ -216,7 +216,7 @@ router.get('/admin-secundario-panel', authenticateToken, requireAdminRole, async
             JOIN admin_assignments aa ON u.id = aa.assigned_user_id
             WHERE r.name IN ('creador_contenido', 'profesor') 
             AND aa.admin_id = $1
-            GROUP BY u.id, u.nickname, up.first_name, up.last_name, u.email
+            GROUP BY u.id, u.nickname, u.email
             ORDER BY u.nickname
         `, [req.user.id]);
 
@@ -225,8 +225,8 @@ router.get('/admin-secundario-panel', authenticateToken, requireAdminRole, async
             SELECT 
                 u.id,
                 u.nickname,
-                up.first_name,
-                up.last_name,
+                '' as first_name,
+                '' as last_name,
                 u.email,
                 COALESCE(array_length(up.loaded_blocks::int[], 1), 0) as blocks_loaded
             FROM users u
@@ -236,7 +236,7 @@ router.get('/admin-secundario-panel', authenticateToken, requireAdminRole, async
             JOIN admin_assignments aa ON u.id = aa.assigned_user_id
             WHERE r.name = 'usuario' 
             AND aa.admin_id = $1
-            GROUP BY u.id, u.nickname, up.first_name, up.last_name, u.email, up.loaded_blocks
+            GROUP BY u.id, u.nickname, u.email, up.loaded_blocks
             ORDER BY u.nickname
         `, [req.user.id]);
 
@@ -826,8 +826,8 @@ router.get('/debug-panel-queries', authenticateToken, async (req, res) => {
                 u.id,
                 u.nickname,
                 COALESCE(u.email, 'Sin email') as email,
-                COALESCE(up.first_name, '') as first_name,
-                COALESCE(up.last_name, '') as last_name,
+                '' as first_name,
+                '' as last_name,
                 COALESCE(r.name, 'usuario') as role_name
             FROM users u
             LEFT JOIN user_profiles up ON u.id = up.user_id
