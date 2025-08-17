@@ -52,6 +52,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
         console.log('Fetching administradores...');
         let adminSecundarios;
         try {
+            // Consulta simplificada para mostrar AdminPrincipal
             adminSecundarios = await pool.query(`
                 SELECT DISTINCT
                     u.id,
@@ -63,13 +64,15 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                     0 as total_blocks_assigned,
                     0 as total_questions_assigned,
                     0 as luminarias,
-                    r.name as role_name
+                    CASE 
+                        WHEN u.nickname = 'AdminPrincipal' THEN 'administrador_principal'
+                        ELSE COALESCE(r.name, 'administrador_secundario')
+                    END as role_name
                 FROM users u
-                LEFT JOIN user_profiles up ON u.id = up.user_id
                 LEFT JOIN user_roles ur ON u.id = ur.user_id
                 LEFT JOIN roles r ON ur.role_id = r.id
                 WHERE u.nickname = 'AdminPrincipal' OR r.name IN ('administrador_principal', 'administrador_secundario')
-                ORDER BY CASE WHEN r.name = 'administrador_principal' THEN 0 ELSE 1 END, u.nickname
+                ORDER BY CASE WHEN u.nickname = 'AdminPrincipal' THEN 0 ELSE 1 END, u.nickname
                 LIMIT 15
             `);
             console.log('Administradores found:', adminSecundarios.rows.length);
@@ -82,6 +85,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
         console.log('Fetching creadores de contenido...');
         let profesoresCreadores;
         try {
+            // Usar la misma consulta que funciona en debug
             profesoresCreadores = await pool.query(`
                 SELECT DISTINCT
                     u.id,
@@ -104,7 +108,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                 LEFT JOIN blocks b ON u.id = b.creator_id
                 WHERE b.id IS NOT NULL AND u.nickname != 'AdminPrincipal'
                 GROUP BY u.id, u.nickname, u.email
-                ORDER BY COUNT(b.id) DESC, u.nickname
+                ORDER BY COUNT(b.id) DESC
                 LIMIT 20
             `);
             console.log('Creadores de contenido found:', profesoresCreadores.rows.length);
