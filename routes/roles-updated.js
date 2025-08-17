@@ -561,4 +561,56 @@ router.get('/my-roles', authenticateToken, async (req, res) => {
     }
 });
 
+// Endpoint de diagnóstico para debug
+router.get('/debug-user-info', authenticateToken, async (req, res) => {
+    try {
+        console.log('Debug request from user:', req.user.id);
+        
+        // Información básica del usuario
+        const userInfo = await pool.query(`
+            SELECT u.id, u.nickname, u.email, u.created_at
+            FROM users u
+            WHERE u.id = $1
+        `, [req.user.id]);
+
+        // Roles del usuario
+        const userRoles = await pool.query(`
+            SELECT r.id, r.name, r.description
+            FROM user_roles ur
+            JOIN roles r ON ur.role_id = r.id
+            WHERE ur.user_id = $1
+        `, [req.user.id]);
+
+        // Todos los roles disponibles
+        const allRoles = await pool.query(`
+            SELECT id, name, description FROM roles ORDER BY name
+        `);
+
+        // Info de tablas
+        const tableInfo = await pool.query(`
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+            AND table_name IN ('users', 'roles', 'user_roles', 'user_profiles')
+            ORDER BY table_name
+        `);
+
+        res.json({
+            user: userInfo.rows[0] || null,
+            user_roles: userRoles.rows,
+            all_roles: allRoles.rows,
+            tables_exist: tableInfo.rows.map(r => r.table_name),
+            timestamp: new Date().toISOString()
+        });
+
+    } catch (error) {
+        console.error('Debug endpoint error:', error);
+        res.status(500).json({ 
+            error: 'Debug error',
+            details: error.message,
+            stack: error.stack
+        });
+    }
+});
+
 module.exports = router;
