@@ -561,54 +561,76 @@ router.get('/my-roles', authenticateToken, async (req, res) => {
     }
 });
 
-// Endpoint de diagnóstico para debug
+// Endpoint básico de diagnóstico sin autenticación
+router.get('/debug-basic', async (req, res) => {
+    try {
+        // Test más básico posible
+        const basicTest = await pool.query('SELECT NOW() as server_time, version() as postgres_version');
+        
+        res.json({
+            status: 'Backend funcionando',
+            database_connected: true,
+            server_time: basicTest.rows[0].server_time,
+            postgres_version: basicTest.rows[0].postgres_version,
+            timestamp: new Date().toISOString()
+        });
+
+    } catch (error) {
+        console.error('Basic debug error:', error);
+        res.status(500).json({ 
+            status: 'Error en backend',
+            database_connected: false,
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
+// Endpoint de diagnóstico con autenticación
 router.get('/debug-user-info', authenticateToken, async (req, res) => {
     try {
-        console.log('Debug request from user:', req.user.id);
+        console.log('Debug request from user:', req.user);
         
-        // Información básica del usuario
-        const userInfo = await pool.query(`
-            SELECT u.id, u.nickname, u.email, u.created_at
-            FROM users u
-            WHERE u.id = $1
-        `, [req.user.id]);
+        // Primero verificar que el usuario existe
+        let userInfo;
+        try {
+            userInfo = await pool.query(`SELECT u.id, u.nickname, u.email FROM users u WHERE u.id = $1`, [req.user.id]);
+        } catch (userError) {
+            return res.json({
+                error: 'Error consultando usuario',
+                user_id: req.user.id,
+                details: userError.message,
+                step: 'user_query'
+            });
+        }
 
-        // Roles del usuario
-        const userRoles = await pool.query(`
-            SELECT r.id, r.name, r.description
-            FROM user_roles ur
-            JOIN roles r ON ur.role_id = r.id
-            WHERE ur.user_id = $1
-        `, [req.user.id]);
-
-        // Todos los roles disponibles
-        const allRoles = await pool.query(`
-            SELECT id, name, description FROM roles ORDER BY name
-        `);
-
-        // Info de tablas
-        const tableInfo = await pool.query(`
-            SELECT table_name 
-            FROM information_schema.tables 
-            WHERE table_schema = 'public' 
-            AND table_name IN ('users', 'roles', 'user_roles', 'user_profiles')
-            ORDER BY table_name
-        `);
+        // Verificar tabla roles
+        let tableCheck;
+        try {
+            tableCheck = await pool.query(`SELECT count(*) as count FROM roles`);
+        } catch (tableError) {
+            return res.json({
+                error: 'Tabla roles no existe',
+                user: userInfo.rows[0],
+                details: tableError.message,
+                step: 'roles_table'
+            });
+        }
 
         res.json({
+            status: 'OK',
             user: userInfo.rows[0] || null,
-            user_roles: userRoles.rows,
-            all_roles: allRoles.rows,
-            tables_exist: tableInfo.rows.map(r => r.table_name),
+            roles_count: tableCheck.rows[0].count,
+            auth_user: req.user,
             timestamp: new Date().toISOString()
         });
 
     } catch (error) {
         console.error('Debug endpoint error:', error);
         res.status(500).json({ 
-            error: 'Debug error',
+            error: 'Debug error general',
             details: error.message,
-            stack: error.stack
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
     }
 });
