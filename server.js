@@ -55,7 +55,7 @@ const blockRoutes = require('./routes/blocks');
 const questionRoutes = require('./routes/questions');
 const gameRoutes = require('./routes/games');
 const roleRoutes = require('./routes/roles');
-const rolesUpdatedRoutes = require('./routes/roles-simple');
+const rolesUpdatedRoutes = require('./routes/roles-updated');
 const communicationRoutes = require('./routes/communication');
 const supportRoutes = require('./routes/support');
 

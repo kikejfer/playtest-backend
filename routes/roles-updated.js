@@ -8,952 +8,7 @@ const pool = new Pool({
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
-// Middleware para verificar rol de administrador
-const requireAdminRole = async (req, res, next) => {
-    try {
-        const result = await pool.query(`
-            SELECT r.name FROM user_roles ur
-            JOIN roles r ON ur.role_id = r.id
-            WHERE ur.user_id = $1 AND r.name IN ('administrador_principal', 'administrador_secundario')
-        `, [req.user.id]);
-
-        if (result.rows.length === 0) {
-            return res.status(403).json({ error: 'Acceso denegado: se requieren permisos administrativos' });
-        }
-
-        req.user.adminRole = result.rows[0].name;
-        next();
-    } catch (error) {
-        console.error('Error verificando rol admin:', error);
-        res.status(500).json({ error: 'Error interno del servidor' });
-    }
-};
-
-// Panel de Administrador Principal - Vista completa TEMPORAL FIX
-router.get('/admin-principal-panel-temp', authenticateToken, async (req, res) => {
-    try {
-        console.log('Using temporary forced panel data...');
-        
-        // AdminPrincipal forzado
-        const adminSecundarios = [{
-            id: 14,
-            nickname: 'AdminPrincipal',
-            email: 'admin@playtest.com',
-            first_name: '',
-            last_name: '',
-            assigned_creators_count: 0,
-            total_blocks_assigned: 0,
-            total_questions_assigned: 0,
-            luminarias: 0,
-            role_name: 'administrador_principal'
-        }];
-        
-        // Creadores desde debug query
-        const creadoresQuery = await pool.query(`
-            SELECT DISTINCT
-                u.id,
-                u.nickname,
-                COALESCE(u.email, 'Sin email') as email,
-                '' as first_name,
-                '' as last_name,
-                0 as assigned_admin_id,
-                'Sin asignar' as assigned_admin_nickname,
-                COUNT(b.id) as blocks_created,
-                0 as total_questions,
-                0 as total_users_blocks,
-                0 as luminarias_actuales,
-                'creador_contenido' as role_name
-            FROM users u
-            LEFT JOIN blocks b ON u.id = b.creator_id
-            WHERE b.id IS NOT NULL AND u.nickname != 'AdminPrincipal'
-            GROUP BY u.id, u.nickname, u.email
-            ORDER BY COUNT(b.id) DESC
-            LIMIT 10
-        `);
-        
-        // Usuarios desde consulta simple
-        const usuariosQuery = await pool.query(`
-            SELECT DISTINCT
-                u.id,
-                u.nickname,
-                COALESCE(u.email, 'Sin email') as email,
-                '' as first_name,
-                '' as last_name,
-                0 as assigned_admin_id,
-                'Sin asignar' as assigned_admin_nickname,
-                0 as blocks_loaded,
-                0 as luminarias_actuales,
-                'usuario' as role_name
-            FROM users u
-            WHERE u.nickname != 'AdminPrincipal' 
-              AND NOT EXISTS (
-                  SELECT 1 FROM blocks b WHERE b.creator_id = u.id
-              )
-            ORDER BY u.nickname
-            LIMIT 20
-        `);
-        
-        const availableAdmins = await pool.query(`
-            SELECT DISTINCT u.id, u.nickname 
-            FROM users u 
-            ORDER BY u.nickname 
-            LIMIT 10
-        `);
-
-        res.json({
-            adminSecundarios: adminSecundarios,
-            profesoresCreadores: creadoresQuery.rows,
-            usuarios: usuariosQuery.rows,
-            availableAdmins: availableAdmins.rows,
-            temp_fix: true,
-            timestamp: new Date().toISOString()
-        });
-        
-    } catch (error) {
-        console.error('Error in temp panel:', error);
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// Panel de Administrador Principal - Vista completa
-router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
-    try {
-        console.log('Admin panel request from user:', req.user.id);
-        
-        // Verificar que es AdminPrincipal específicamente
-        const adminCheck = await pool.query(`
-            SELECT r.name as role_name FROM user_roles ur
-            JOIN roles r ON ur.role_id = r.id
-            WHERE ur.user_id = $1 AND r.name IN ('administrador_principal', 'administrador_secundario')
-        `, [req.user.id]);
-
-        if (adminCheck.rows.length === 0) {
-            return res.status(403).json({ error: 'Se requieren permisos administrativos para acceder a este panel' });
-        }
-
-        const userRole = adminCheck.rows[0].role_name;
-        console.log('User role:', userRole, 'accessing admin panel');
-
-        // Sección 1: Administradores (Principal y Secundarios)
-        console.log('Fetching administradores...');
-        let adminSecundarios;
-        try {
-            // Consulta simplificada para mostrar AdminPrincipal
-            adminSecundarios = await pool.query(`
-                SELECT DISTINCT
-                    u.id,
-                    u.nickname,
-                    COALESCE(u.email, 'Sin email') as email,
-                    '' as first_name,
-                    '' as last_name,
-                    0 as assigned_creators_count,
-                    0 as total_blocks_assigned,
-                    0 as total_questions_assigned,
-                    0 as luminarias,
-                    CASE 
-                        WHEN u.nickname = 'AdminPrincipal' THEN 'administrador_principal'
-                        ELSE COALESCE(r.name, 'administrador_secundario')
-                    END as role_name
-                FROM users u
-                LEFT JOIN user_roles ur ON u.id = ur.user_id
-                LEFT JOIN roles r ON ur.role_id = r.id
-                WHERE u.nickname = 'AdminPrincipal' OR r.name IN ('administrador_principal', 'administrador_secundario')
-                ORDER BY CASE WHEN u.nickname = 'AdminPrincipal' THEN 0 ELSE 1 END, u.nickname
-                LIMIT 15
-            `);
-            console.log('Administradores found:', adminSecundarios.rows.length);
-        } catch (adminError) {
-            console.error('Error fetching administradores:', adminError);
-            adminSecundarios = { rows: [] };
-        }
-
-        // Sección 2: Creadores de Contenido (usuarios con bloques)
-        console.log('Fetching creadores de contenido...');
-        let profesoresCreadores;
-        try {
-            // Usar la misma consulta que funciona en debug
-            profesoresCreadores = await pool.query(`
-                SELECT DISTINCT
-                    u.id,
-                    u.nickname,
-                    COALESCE(u.email, 'Sin email') as email,
-                    '' as first_name,
-                    '' as last_name,
-                    0 as assigned_admin_id,
-                    'Sin asignar' as assigned_admin_nickname,
-                    COUNT(b.id) as blocks_created,
-                    COALESCE(SUM(b.total_questions), 0) as total_questions,
-                    0 as total_users_blocks,
-                    0 as luminarias_actuales,
-                    0 as luminarias_ganadas,
-                    0 as luminarias_gastadas,
-                    0 as luminarias_abonadas,
-                    0 as luminarias_compradas,
-                    'creador_contenido' as role_name
-                FROM users u
-                LEFT JOIN blocks b ON u.id = b.creator_id
-                WHERE b.id IS NOT NULL AND u.nickname != 'AdminPrincipal'
-                GROUP BY u.id, u.nickname, u.email
-                ORDER BY COUNT(b.id) DESC
-                LIMIT 20
-            `);
-            console.log('Creadores de contenido found:', profesoresCreadores.rows.length);
-        } catch (profError) {
-            console.error('Error fetching creadores:', profError);
-            profesoresCreadores = { rows: [] };
-        }
-
-        // Sección 3: Usuarios regulares (excluyendo admins y creadores)
-        console.log('Fetching usuarios regulares...');
-        let usuarios;
-        try {
-            usuarios = await pool.query(`
-                SELECT DISTINCT
-                    u.id,
-                    u.nickname,
-                    COALESCE(u.email, 'Sin email') as email,
-                    '' as first_name,
-                    '' as last_name,
-                    0 as assigned_admin_id,
-                    'Sin asignar' as assigned_admin_nickname,
-                    COALESCE((
-                        SELECT COUNT(*) 
-                        FROM blocks b 
-                        WHERE b.creator_id = u.id
-                    ), 0) as blocks_loaded,
-                    0 as luminarias_actuales,
-                    0 as luminarias_ganadas,
-                    0 as luminarias_gastadas,
-                    0 as luminarias_abonadas,
-                    0 as luminarias_compradas,
-                    COALESCE(r.name, 'usuario') as role_name
-                FROM users u
-                LEFT JOIN user_profiles up ON u.id = up.user_id
-                LEFT JOIN user_roles ur ON u.id = ur.user_id
-                LEFT JOIN roles r ON ur.role_id = r.id
-                WHERE u.nickname != 'AdminPrincipal'
-                ORDER BY u.nickname
-                LIMIT 30
-            `);
-            console.log('Usuarios regulares found:', usuarios.rows.length);
-        } catch (userError) {
-            console.error('Error fetching usuarios:', userError);
-            usuarios = { rows: [] };
-        }
-
-        // Lista de administradores disponibles para asignación - simplificada
-        console.log('Fetching available admins...');
-        let availableAdmins;
-        try {
-            availableAdmins = await pool.query(`
-                SELECT id, nickname
-                FROM users
-                ORDER BY nickname
-                LIMIT 5
-            `);
-            console.log('Available admins found:', availableAdmins.rows.length);
-        } catch (adminListError) {
-            console.error('Error fetching available admins:', adminListError);
-            availableAdmins = { rows: [] };
-        }
-
-        res.json({
-            adminSecundarios: adminSecundarios.rows,
-            profesoresCreadores: profesoresCreadores.rows,
-            usuarios: usuarios.rows,
-            availableAdmins: availableAdmins.rows
-        });
-
-    } catch (error) {
-        console.error('Error obteniendo panel AdminPrincipal:', error);
-        console.error('Error details:', error.message);
-        console.error('Stack trace:', error.stack);
-        res.status(500).json({ 
-            error: 'Error interno del servidor',
-            details: error.message,
-            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-        });
-    }
-});
-
-// Panel de Administrador Secundario - Vista limitada
-router.get('/admin-secundario-panel', authenticateToken, requireAdminRole, async (req, res) => {
-    try {
-        if (req.user.adminRole !== 'administrador_secundario') {
-            return res.status(403).json({ error: 'Solo Administradores Secundarios pueden acceder' });
-        }
-
-        // Sección 1: Profesores/Creadores asignados (sin luminarias)
-        const profesoresCreadores = await pool.query(`
-            SELECT 
-                u.id,
-                u.nickname,
-                '' as first_name,
-                '' as last_name,
-                u.email,
-                COUNT(DISTINCT b.id) as blocks_created,
-                COALESCE(SUM(b.total_questions), 0) as total_questions,
-                COALESCE(SUM(b.total_users), 0) as total_users_blocks,
-                array_agg(DISTINCT r.name) as roles
-            FROM users u
-            LEFT JOIN user_profiles up ON u.id = up.user_id
-            LEFT JOIN blocks b ON u.id = b.creator_id AND b.is_public = true
-            JOIN user_roles ur ON u.id = ur.user_id
-            JOIN roles r ON ur.role_id = r.id
-            JOIN admin_assignments aa ON u.id = aa.assigned_user_id
-            WHERE r.name IN ('creador_contenido', 'profesor') 
-            AND aa.admin_id = $1
-            GROUP BY u.id, u.nickname, u.email
-            ORDER BY u.nickname
-        `, [req.user.id]);
-
-        // Sección 2: Usuarios asignados (sin luminarias ni reasignación)
-        const usuarios = await pool.query(`
-            SELECT 
-                u.id,
-                u.nickname,
-                '' as first_name,
-                '' as last_name,
-                u.email,
-                COALESCE(array_length(up.loaded_blocks::int[], 1), 0) as blocks_loaded
-            FROM users u
-            LEFT JOIN user_profiles up ON u.id = up.user_id
-            JOIN user_roles ur ON u.id = ur.user_id
-            JOIN roles r ON ur.role_id = r.id
-            JOIN admin_assignments aa ON u.id = aa.assigned_user_id
-            WHERE r.name = 'usuario' 
-            AND aa.admin_id = $1
-            GROUP BY u.id, u.nickname, u.email, up.loaded_blocks
-            ORDER BY u.nickname
-        `, [req.user.id]);
-
-        res.json({
-            profesoresCreadores: profesoresCreadores.rows,
-            usuarios: usuarios.rows
-        });
-
-    } catch (error) {
-        console.error('Error obteniendo panel AdminSecundario:', error);
-        res.status(500).json({ error: 'Error interno del servidor' });
-    }
-});
-
-// Asignar nuevo Administrador Secundario
-router.post('/assign-admin-secundario', authenticateToken, async (req, res) => {
-    try {
-        // Solo AdminPrincipal puede asignar
-        const adminCheck = await pool.query(`
-            SELECT 1 FROM user_roles ur
-            JOIN roles r ON ur.role_id = r.id
-            WHERE ur.user_id = $1 AND r.name = 'administrador_principal'
-        `, [req.user.id]);
-
-        if (adminCheck.rows.length === 0) {
-            return res.status(403).json({ error: 'Solo el Administrador Principal puede asignar administradores' });
-        }
-
-        const { nickname } = req.body;
-
-        if (!nickname) {
-            return res.status(400).json({ error: 'Nickname es requerido' });
-        }
-
-        // Verificar que el usuario existe
-        const userCheck = await pool.query('SELECT id FROM users WHERE nickname = $1', [nickname]);
-        
-        if (userCheck.rows.length === 0) {
-            return res.status(404).json({ error: 'Usuario no encontrado' });
-        }
-
-        const userId = userCheck.rows[0].id;
-
-        // Verificar que no sea ya administrador
-        const existingAdmin = await pool.query(`
-            SELECT 1 FROM user_roles ur
-            JOIN roles r ON ur.role_id = r.id
-            WHERE ur.user_id = $1 AND r.name IN ('administrador_principal', 'administrador_secundario')
-        `, [userId]);
-
-        if (existingAdmin.rows.length > 0) {
-            return res.status(400).json({ error: 'El usuario ya tiene rol administrativo' });
-        }
-
-        // Asignar rol
-        await pool.query(`
-            INSERT INTO user_roles (user_id, role_id, assigned_by, auto_assigned)
-            SELECT $1, r.id, $2, false
-            FROM roles r
-            WHERE r.name = 'administrador_secundario'
-        `, [userId, req.user.id]);
-
-        // Inicializar luminarias si no existen
-        await pool.query(`
-            INSERT INTO user_luminarias (user_id)
-            VALUES ($1)
-            ON CONFLICT (user_id) DO NOTHING
-        `, [userId]);
-
-        res.json({ 
-            message: 'Administrador Secundario asignado exitosamente',
-            userId: userId,
-            nickname: nickname
-        });
-
-    } catch (error) {
-        console.error('Error asignando administrador secundario:', error);
-        res.status(500).json({ error: 'Error interno del servidor' });
-    }
-});
-
-// Reasignar usuario a diferente administrador
-router.post('/reassign-user', authenticateToken, async (req, res) => {
-    try {
-        // Solo AdminPrincipal puede reasignar
-        const adminCheck = await pool.query(`
-            SELECT 1 FROM user_roles ur
-            JOIN roles r ON ur.role_id = r.id
-            WHERE ur.user_id = $1 AND r.name = 'administrador_principal'
-        `, [req.user.id]);
-
-        if (adminCheck.rows.length === 0) {
-            return res.status(403).json({ error: 'Solo el Administrador Principal puede reasignar usuarios' });
-        }
-
-        const { userId, newAdminId } = req.body;
-
-        if (!userId || !newAdminId) {
-            return res.status(400).json({ error: 'userId y newAdminId son requeridos' });
-        }
-
-        // Verificar que el nuevo admin existe y es administrador secundario
-        const adminVerify = await pool.query(`
-            SELECT 1 FROM user_roles ur
-            JOIN roles r ON ur.role_id = r.id
-            WHERE ur.user_id = $1 AND r.name = 'administrador_secundario'
-        `, [newAdminId]);
-
-        if (adminVerify.rows.length === 0) {
-            return res.status(400).json({ error: 'El nuevo administrador no es válido' });
-        }
-
-        // Actualizar asignación
-        await pool.query(`
-            UPDATE admin_assignments 
-            SET admin_id = $1, assigned_by = $2
-            WHERE assigned_user_id = $3
-        `, [newAdminId, req.user.id, userId]);
-
-        res.json({ message: 'Usuario reasignado exitosamente' });
-
-    } catch (error) {
-        console.error('Error reasignando usuario:', error);
-        res.status(500).json({ error: 'Error interno del servidor' });
-    }
-});
-
-// Obtener bloques detallados de un creador/profesor
-router.get('/user-blocks/:userId', authenticateToken, requireAdminRole, async (req, res) => {
-    try {
-        const { userId } = req.params;
-
-        const blocks = await pool.query(`
-            SELECT 
-                b.id,
-                b.name,
-                b.description,
-                b.created_at,
-                COUNT(DISTINCT q.id) as total_questions,
-                COUNT(DISTINCT q.topic) as total_topics,
-                COALESCE(b.total_users, 0) as total_users
-            FROM blocks b
-            LEFT JOIN questions q ON b.id = q.block_id
-            WHERE b.creator_id = $1 AND b.is_public = true
-            GROUP BY b.id, b.name, b.description, b.created_at, b.total_users
-            ORDER BY b.created_at DESC
-        `, [userId]);
-
-        res.json({ blocks: blocks.rows });
-
-    } catch (error) {
-        console.error('Error obteniendo bloques del usuario:', error);
-        res.status(500).json({ error: 'Error interno del servidor' });
-    }
-});
-
-// Obtener temas de un bloque
-router.get('/block-topics/:blockId', authenticateToken, requireAdminRole, async (req, res) => {
-    try {
-        const { blockId } = req.params;
-
-        const topics = await pool.query(`
-            SELECT 
-                topic,
-                COUNT(*) as question_count
-            FROM questions
-            WHERE block_id = $1
-            GROUP BY topic
-            ORDER BY topic
-        `, [blockId]);
-
-        res.json({ topics: topics.rows });
-
-    } catch (error) {
-        console.error('Error obteniendo temas del bloque:', error);
-        res.status(500).json({ error: 'Error interno del servidor' });
-    }
-});
-
-// Obtener preguntas de un tema específico
-router.get('/topic-questions/:blockId/:topic', authenticateToken, requireAdminRole, async (req, res) => {
-    try {
-        const { blockId, topic } = req.params;
-
-        const questions = await pool.query(`
-            SELECT 
-                q.id,
-                q.text_question,
-                q.difficulty,
-                q.explanation,
-                q.created_at,
-                array_agg(
-                    json_build_object(
-                        'id', a.id,
-                        'text', a.answer_text,
-                        'is_correct', a.is_correct
-                    )
-                ) as answers
-            FROM questions q
-            LEFT JOIN answers a ON q.id = a.question_id
-            WHERE q.block_id = $1 AND q.topic = $2
-            GROUP BY q.id, q.text_question, q.difficulty, q.explanation, q.created_at
-            ORDER BY q.created_at DESC
-        `, [blockId, topic]);
-
-        res.json({ questions: questions.rows });
-
-    } catch (error) {
-        console.error('Error obteniendo preguntas del tema:', error);
-        res.status(500).json({ error: 'Error interno del servidor' });
-    }
-});
-
-// Ejecutar redistribución manual
-router.post('/redistribute-users', authenticateToken, async (req, res) => {
-    try {
-        // Solo AdminPrincipal puede redistribuir
-        const adminCheck = await pool.query(`
-            SELECT 1 FROM user_roles ur
-            JOIN roles r ON ur.role_id = r.id
-            WHERE ur.user_id = $1 AND r.name = 'administrador_principal'
-        `, [req.user.id]);
-
-        if (adminCheck.rows.length === 0) {
-            return res.status(403).json({ error: 'Solo el Administrador Principal puede redistribuir usuarios' });
-        }
-
-        const result = await pool.query('SELECT redistribute_users_to_admins() as redistributed_count');
-        const redistributedCount = result.rows[0].redistributed_count;
-
-        res.json({
-            message: `Redistribución completada: ${redistributedCount} usuarios redistribuidos`,
-            redistributedCount
-        });
-
-    } catch (error) {
-        console.error('Error en redistribución:', error);
-        res.status(500).json({ error: 'Error interno del servidor' });
-    }
-});
-
-// Crear código educativo
-router.post('/create-educational-code', authenticateToken, async (req, res) => {
-    try {
-        const { code, institutionName, maxUses, expiresAt } = req.body;
-
-        if (!code) {
-            return res.status(400).json({ error: 'Código es requerido' });
-        }
-
-        const result = await pool.query(`
-            INSERT INTO educational_codes (code, institution_name, created_by, max_uses, expires_at)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING id, code, created_at
-        `, [code, institutionName || null, req.user.id, maxUses || null, expiresAt || null]);
-
-        res.json({
-            message: 'Código educativo creado exitosamente',
-            educationalCode: result.rows[0]
-        });
-
-    } catch (error) {
-        if (error.code === '23505') { // unique violation
-            res.status(400).json({ error: 'El código ya existe' });
-        } else {
-            console.error('Error creando código educativo:', error);
-            res.status(500).json({ error: 'Error interno del servidor' });
-        }
-    }
-});
-
-// Usar código educativo
-router.post('/use-educational-code', authenticateToken, async (req, res) => {
-    try {
-        const { code } = req.body;
-
-        if (!code) {
-            return res.status(400).json({ error: 'Código es requerido' });
-        }
-
-        const result = await pool.query('SELECT assign_professor_by_code($1, $2) as success', 
-            [req.user.id, code]);
-
-        if (result.rows[0].success) {
-            res.json({ message: 'Código educativo aplicado exitosamente' });
-        } else {
-            res.status(400).json({ error: 'Código inválido, expirado o agotado' });
-        }
-
-    } catch (error) {
-        console.error('Error usando código educativo:', error);
-        res.status(500).json({ error: 'Error interno del servidor' });
-    }
-});
-
-// Obtener roles del usuario actual
-router.get('/my-roles', authenticateToken, async (req, res) => {
-    try {
-        const result = await pool.query(`
-            SELECT 
-                r.name,
-                r.description,
-                r.hierarchy_level,
-                ur.assigned_at,
-                ur.auto_assigned
-            FROM user_roles ur
-            JOIN roles r ON ur.role_id = r.id
-            WHERE ur.user_id = $1
-            ORDER BY r.hierarchy_level
-        `, [req.user.id]);
-
-        res.json(result.rows);
-
-    } catch (error) {
-        console.error('Error obteniendo roles:', error);
-        res.status(500).json({ error: 'Error interno del servidor' });
-    }
-});
-
-// Endpoint básico de diagnóstico sin autenticación
-router.get('/debug-basic', async (req, res) => {
-    try {
-        // Test más básico posible
-        const basicTest = await pool.query('SELECT NOW() as server_time, version() as postgres_version');
-        
-        res.json({
-            status: 'Backend funcionando',
-            database_connected: true,
-            server_time: basicTest.rows[0].server_time,
-            postgres_version: basicTest.rows[0].postgres_version,
-            timestamp: new Date().toISOString()
-        });
-
-    } catch (error) {
-        console.error('Basic debug error:', error);
-        res.status(500).json({ 
-            status: 'Error en backend',
-            database_connected: false,
-            error: error.message,
-            timestamp: new Date().toISOString()
-        });
-    }
-});
-
-// Endpoint de diagnóstico con autenticación
-router.get('/debug-user-info', authenticateToken, async (req, res) => {
-    try {
-        console.log('Debug request from user:', req.user);
-        
-        // Primero verificar que el usuario existe
-        let userInfo;
-        try {
-            userInfo = await pool.query(`SELECT u.id, u.nickname, u.email FROM users u WHERE u.id = $1`, [req.user.id]);
-        } catch (userError) {
-            return res.json({
-                error: 'Error consultando usuario',
-                user_id: req.user.id,
-                details: userError.message,
-                step: 'user_query'
-            });
-        }
-
-        // Verificar tabla roles
-        let tableCheck;
-        try {
-            tableCheck = await pool.query(`SELECT count(*) as count FROM roles`);
-        } catch (tableError) {
-            return res.json({
-                error: 'Tabla roles no existe',
-                user: userInfo.rows[0],
-                details: tableError.message,
-                step: 'roles_table'
-            });
-        }
-
-        res.json({
-            status: 'OK',
-            user: userInfo.rows[0] || null,
-            roles_count: tableCheck.rows[0].count,
-            auth_user: req.user,
-            timestamp: new Date().toISOString()
-        });
-
-    } catch (error) {
-        console.error('Debug endpoint error:', error);
-        res.status(500).json({ 
-            error: 'Debug error general',
-            details: error.message,
-            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-        });
-    }
-});
-
-// Endpoint para crear tablas de roles si no existen
-router.post('/setup-roles', authenticateToken, async (req, res) => {
-    try {
-        console.log('Setting up roles tables...');
-        
-        // Crear tabla roles
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS roles (
-                id SERIAL PRIMARY KEY,
-                name VARCHAR(100) UNIQUE NOT NULL,
-                description TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        `);
-        
-        // Crear tabla user_roles
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS user_roles (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-                role_id INTEGER REFERENCES roles(id) ON DELETE CASCADE,
-                assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(user_id, role_id)
-            )
-        `);
-        
-        // Insertar roles básicos si no existen
-        const roleInserts = [
-            ['administrador_principal', 'Administrador principal del sistema con todos los permisos'],
-            ['administrador_secundario', 'Administrador secundario con permisos limitados'],
-            ['profesor', 'Profesor con acceso a herramientas educativas'],
-            ['creador_contenido', 'Creador de contenido y bloques'],
-            ['usuario', 'Usuario regular del sistema']
-        ];
-        
-        for (const [name, description] of roleInserts) {
-            await pool.query(
-                'INSERT INTO roles (name, description) VALUES ($1, $2) ON CONFLICT (name) DO NOTHING',
-                [name, description]
-            );
-        }
-        
-        // Asignar rol de administrador principal al usuario actual
-        const adminRoleResult = await pool.query('SELECT id FROM roles WHERE name = $1', ['administrador_principal']);
-        if (adminRoleResult.rows.length > 0) {
-            await pool.query(
-                'INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT (user_id, role_id) DO NOTHING',
-                [req.user.id, adminRoleResult.rows[0].id]
-            );
-        }
-        
-        // Verificar el setup
-        const rolesCount = await pool.query('SELECT COUNT(*) as count FROM roles');
-        const userRoleCheck = await pool.query(`
-            SELECT r.name FROM user_roles ur 
-            JOIN roles r ON ur.role_id = r.id 
-            WHERE ur.user_id = $1
-        `, [req.user.id]);
-        
-        res.json({
-            success: true,
-            message: 'Tablas de roles creadas exitosamente',
-            roles_created: parseInt(rolesCount.rows[0].count),
-            user_roles: userRoleCheck.rows.map(r => r.name),
-            user_id: req.user.id,
-            timestamp: new Date().toISOString()
-        });
-        
-    } catch (error) {
-        console.error('Error setting up roles:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Error creando tablas de roles',
-            details: error.message
-        });
-    }
-});
-
-// Endpoint para buscar usuarios por nickname para añadir administradores
-router.get('/search-users', authenticateToken, async (req, res) => {
-    try {
-        const { q: searchQuery } = req.query;
-        
-        if (!searchQuery || searchQuery.length < 2) {
-            return res.json({ users: [] });
-        }
-        
-        console.log('Searching users with query:', searchQuery);
-        
-        // Buscar usuarios que coincidan con el nickname
-        const searchResults = await pool.query(`
-            SELECT DISTINCT
-                u.id,
-                u.nickname,
-                u.email,
-                COALESCE(r.name, 'sin_rol') as current_role
-            FROM users u
-            LEFT JOIN user_roles ur ON u.id = ur.user_id
-            LEFT JOIN roles r ON ur.role_id = r.id
-            WHERE LOWER(u.nickname) LIKE LOWER($1)
-            ORDER BY u.nickname
-            LIMIT 10
-        `, [`%${searchQuery}%`]);
-        
-        console.log('Search results found:', searchResults.rows.length);
-        
-        res.json({
-            users: searchResults.rows,
-            query: searchQuery,
-            count: searchResults.rows.length
-        });
-        
-    } catch (error) {
-        console.error('Error searching users:', error);
-        res.status(500).json({ 
-            error: 'Error buscando usuarios',
-            details: error.message 
-        });
-    }
-});
-
-// Endpoint para añadir administrador secundario
-router.post('/add-admin-secundario', authenticateToken, async (req, res) => {
-    try {
-        const { user_id, nickname } = req.body;
-        
-        if (!user_id) {
-            return res.status(400).json({ error: 'user_id es requerido' });
-        }
-        
-        console.log('Adding admin secundario role to user:', user_id, nickname);
-        
-        // Verificar que el usuario existe
-        const userCheck = await pool.query('SELECT id, nickname, email FROM users WHERE id = $1', [user_id]);
-        if (userCheck.rows.length === 0) {
-            return res.status(404).json({ error: 'Usuario no encontrado' });
-        }
-        
-        // Obtener el rol de administrador secundario
-        const roleResult = await pool.query('SELECT id FROM roles WHERE name = $1', ['administrador_secundario']);
-        if (roleResult.rows.length === 0) {
-            return res.status(500).json({ error: 'Rol administrador_secundario no encontrado' });
-        }
-        
-        const roleId = roleResult.rows[0].id;
-        
-        // Verificar si ya tiene el rol
-        const existingRole = await pool.query(
-            'SELECT 1 FROM user_roles WHERE user_id = $1 AND role_id = $2',
-            [user_id, roleId]
-        );
-        
-        if (existingRole.rows.length > 0) {
-            return res.status(400).json({ error: 'El usuario ya es administrador secundario' });
-        }
-        
-        // Asignar el rol
-        await pool.query(
-            'INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)',
-            [user_id, roleId]
-        );
-        
-        const user = userCheck.rows[0];
-        
-        res.json({
-            success: true,
-            message: `${user.nickname} fue agregado como administrador secundario`,
-            user: {
-                id: user.id,
-                nickname: user.nickname,
-                email: user.email,
-                role: 'administrador_secundario'
-            }
-        });
-        
-    } catch (error) {
-        console.error('Error adding admin secundario:', error);
-        res.status(500).json({ 
-            error: 'Error añadiendo administrador secundario',
-            details: error.message 
-        });
-    }
-});
-
-// Debug endpoint temporal para ver qué usuarios existen
-// Debug específico para las consultas del panel principal
-router.get('/debug-panel-queries', authenticateToken, async (req, res) => {
-    try {
-        console.log('Debug panel queries - starting...');
-        
-        // Probar consulta de usuarios
-        const usuariosTest = await pool.query(`
-            SELECT DISTINCT
-                u.id,
-                u.nickname,
-                COALESCE(u.email, 'Sin email') as email,
-                '' as first_name,
-                '' as last_name,
-                COALESCE(r.name, 'usuario') as role_name
-            FROM users u
-            LEFT JOIN user_profiles up ON u.id = up.user_id
-            LEFT JOIN user_roles ur ON u.id = ur.user_id
-            LEFT JOIN roles r ON ur.role_id = r.id
-            WHERE u.nickname != 'AdminPrincipal'
-            ORDER BY u.nickname
-            LIMIT 10
-        `);
-        
-        // Probar consulta de creadores
-        const creadoresTest = await pool.query(`
-            SELECT DISTINCT
-                u.id,
-                u.nickname,
-                COUNT(b.id) as blocks_created
-            FROM users u
-            LEFT JOIN blocks b ON u.id = b.creator_id
-            WHERE b.id IS NOT NULL AND u.nickname != 'AdminPrincipal'
-            GROUP BY u.id, u.nickname
-            ORDER BY COUNT(b.id) DESC
-            LIMIT 10
-        `);
-        
-        res.json({
-            success: true,
-            usuarios_query_result: usuariosTest.rows,
-            usuarios_count: usuariosTest.rows.length,
-            creadores_query_result: creadoresTest.rows,
-            creadores_count: creadoresTest.rows.length,
-            timestamp: new Date().toISOString()
-        });
-        
-    } catch (error) {
-        console.error('Debug panel queries error:', error);
-        res.status(500).json({ error: error.message });
-    }
-});
-
+// Debug endpoint que sabemos que funciona
 router.get('/debug-users', authenticateToken, async (req, res) => {
     try {
         // Usuarios básicos
@@ -970,15 +25,14 @@ router.get('/debug-users', authenticateToken, async (req, res) => {
         
         // Usuarios con bloques
         const usersWithBlocks = await pool.query(`
-            SELECT u.id, u.nickname, COUNT(b.id) as block_count
+            SELECT DISTINCT u.id, u.nickname, u.email, COUNT(b.id) as block_count
             FROM users u
-            LEFT JOIN blocks b ON u.id = b.creator_id
-            GROUP BY u.id, u.nickname
-            HAVING COUNT(b.id) > 0
-            ORDER BY COUNT(b.id) DESC LIMIT 10
+            INNER JOIN blocks b ON u.id = b.creator_id
+            GROUP BY u.id, u.nickname, u.email
+            ORDER BY u.id LIMIT 10
         `);
         
-        // Check user_profiles
+        // Contar perfiles
         const profilesCount = await pool.query('SELECT COUNT(*) as count FROM user_profiles');
         
         res.json({
@@ -995,125 +49,184 @@ router.get('/debug-users', authenticateToken, async (req, res) => {
     }
 });
 
-// Endpoint para borrar usuario completamente
+// Panel principal ULTRA SIMPLE que funciona
+router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
+    try {
+        console.log('ULTRA SIMPLE admin panel request from user:', req.user.id);
+        
+        // Solo consultas básicas y seguras
+        const allUsers = await pool.query('SELECT id, nickname, COALESCE(email, \'Sin email\') as email FROM users ORDER BY id');
+        
+        const usersWithBlocks = await pool.query(`
+            SELECT DISTINCT u.id, u.nickname, COALESCE(u.email, 'Sin email') as email, COUNT(b.id) as block_count
+            FROM users u 
+            INNER JOIN blocks b ON u.id = b.creator_id
+            GROUP BY u.id, u.nickname, u.email
+        `);
+        
+        const blockCreatorIds = new Set(usersWithBlocks.rows.map(u => u.id));
+        
+        // AdminPrincipal como administrador
+        const adminSecundarios = allUsers.rows
+            .filter(user => user.nickname === 'AdminPrincipal')
+            .map(user => ({
+                id: user.id,
+                nickname: user.nickname,
+                email: user.email,
+                first_name: '', last_name: '',
+                assigned_creators_count: 0, total_blocks_assigned: 0, total_questions_assigned: 0, luminarias: 0,
+                role_name: 'administrador_principal'
+            }));
+
+        // Usuarios con bloques como creadores
+        const profesoresCreadores = usersWithBlocks.rows
+            .filter(user => user.nickname !== 'AdminPrincipal')
+            .map(user => ({
+                id: user.id, nickname: user.nickname, email: user.email,
+                first_name: '', last_name: '', assigned_admin_id: 0, assigned_admin_nickname: 'Sin asignar',
+                blocks_created: parseInt(user.block_count) || 1, total_questions: 0, total_users_blocks: 0,
+                luminarias_actuales: 0, luminarias_ganadas: 0, luminarias_gastadas: 0, luminarias_abonadas: 0, luminarias_compradas: 0,
+                role_name: 'creador_contenido'
+            }));
+
+        // Usuarios sin bloques
+        const usuarios = allUsers.rows
+            .filter(user => user.nickname !== 'AdminPrincipal' && !blockCreatorIds.has(user.id))
+            .map(user => ({
+                id: user.id, nickname: user.nickname, email: user.email,
+                first_name: '', last_name: '', assigned_admin_id: 0, assigned_admin_nickname: 'Sin asignar', blocks_loaded: 0,
+                luminarias_actuales: 0, luminarias_ganadas: 0, luminarias_gastadas: 0, luminarias_abonadas: 0, luminarias_compradas: 0,
+                role_name: 'usuario'
+            }));
+
+        console.log(`Panel data: ${adminSecundarios.length} admins, ${profesoresCreadores.length} creadores, ${usuarios.length} usuarios`);
+
+        res.json({
+            adminSecundarios: adminSecundarios,
+            profesoresCreadores: profesoresCreadores,
+            usuarios: usuarios,
+            availableAdmins: allUsers.rows,
+            ultra_simple_version: true
+        });
+
+    } catch (error) {
+        console.error('Error in ultra simple admin panel:', error);
+        res.status(500).json({ error: 'Error interno del servidor', details: error.message });
+    }
+});
+
+// Endpoint de borrado simplificado
 router.delete('/delete-user/:userId', authenticateToken, async (req, res) => {
     try {
         const { userId } = req.params;
-        const adminUserId = req.user.id;
+        console.log(`Delete request for user ${userId}`);
         
-        console.log(`Admin ${adminUserId} attempting to delete user ${userId}`);
-        
-        // Verificar que es administrador
-        const adminCheck = await pool.query(`
-            SELECT r.name FROM user_roles ur
-            JOIN roles r ON ur.role_id = r.id
-            WHERE ur.user_id = $1 AND r.name IN ('administrador_principal', 'administrador_secundario')
-        `, [adminUserId]);
-
-        if (adminCheck.rows.length === 0) {
-            return res.status(403).json({ error: 'No tienes permisos para borrar usuarios' });
-        }
-
         // Verificar que el usuario existe
-        const userCheck = await pool.query('SELECT nickname FROM users WHERE id = $1', [userId]);
+        const userCheck = await pool.query('SELECT id, nickname FROM users WHERE id = $1', [userId]);
         if (userCheck.rows.length === 0) {
             return res.status(404).json({ error: 'Usuario no encontrado' });
         }
-
-        const nickname = userCheck.rows[0].nickname;
         
-        // Evitar que se borre a sí mismo
-        if (parseInt(userId) === adminUserId) {
-            return res.status(400).json({ error: 'No puedes borrar tu propia cuenta' });
+        const user = userCheck.rows[0];
+        
+        // Proteger AdminPrincipal
+        if (user.nickname === 'AdminPrincipal') {
+            return res.status(403).json({ error: 'No se puede borrar AdminPrincipal' });
         }
-
+        
+        // Borrar en orden para evitar errores de clave foránea
         const deletedData = [];
-        let totalDeleted = 0;
-
-        // 1. Borrar preguntas de bloques del usuario
-        const deletedQuestions = await pool.query(`
-            DELETE FROM questions WHERE block_id IN (
-                SELECT id FROM blocks WHERE creator_id = $1
-            )
-        `, [userId]);
-        if (deletedQuestions.rowCount > 0) {
-            deletedData.push(`✗ ${deletedQuestions.rowCount} preguntas`);
-            totalDeleted += deletedQuestions.rowCount;
-        }
-
-        // 2. Borrar bloques del usuario
-        const deletedBlocks = await pool.query('DELETE FROM blocks WHERE creator_id = $1', [userId]);
-        if (deletedBlocks.rowCount > 0) {
-            deletedData.push(`✗ ${deletedBlocks.rowCount} bloques`);
-            totalDeleted += deletedBlocks.rowCount;
-        }
-
-        // 3. Borrar respuestas del usuario
+        
+        // 1. Borrar respuestas de usuario
         const deletedAnswers = await pool.query('DELETE FROM user_answers WHERE user_id = $1', [userId]);
         if (deletedAnswers.rowCount > 0) {
-            deletedData.push(`✗ ${deletedAnswers.rowCount} respuestas`);
-            totalDeleted += deletedAnswers.rowCount;
+            deletedData.push(`${deletedAnswers.rowCount} respuestas de usuario`);
         }
-
-        // 4. Borrar partidas del usuario
+        
+        // 2. Borrar progreso de juegos
+        const deletedProgress = await pool.query('DELETE FROM user_game_progress WHERE user_id = $1', [userId]);
+        if (deletedProgress.rowCount > 0) {
+            deletedData.push(`${deletedProgress.rowCount} registros de progreso`);
+        }
+        
+        // 3. Borrar juegos
         const deletedGames = await pool.query('DELETE FROM games WHERE user_id = $1', [userId]);
         if (deletedGames.rowCount > 0) {
-            deletedData.push(`✗ ${deletedGames.rowCount} partidas`);
-            totalDeleted += deletedGames.rowCount;
+            deletedData.push(`${deletedGames.rowCount} juegos`);
         }
-
-        // 5. Borrar perfil del usuario
-        const deletedProfile = await pool.query('DELETE FROM user_profiles WHERE user_id = $1', [userId]);
-        if (deletedProfile.rowCount > 0) {
-            deletedData.push(`✗ Perfil de usuario`);
-            totalDeleted += deletedProfile.rowCount;
+        
+        // 4. Borrar preguntas creadas por el usuario
+        const deletedQuestions = await pool.query('DELETE FROM questions WHERE creator_id = $1', [userId]);
+        if (deletedQuestions.rowCount > 0) {
+            deletedData.push(`${deletedQuestions.rowCount} preguntas creadas`);
         }
-
-        // 6. Borrar roles del usuario
+        
+        // 5. Borrar bloques creados por el usuario
+        const deletedBlocks = await pool.query('DELETE FROM blocks WHERE creator_id = $1', [userId]);
+        if (deletedBlocks.rowCount > 0) {
+            deletedData.push(`${deletedBlocks.rowCount} bloques creados`);
+        }
+        
+        // 6. Borrar roles de usuario
         const deletedRoles = await pool.query('DELETE FROM user_roles WHERE user_id = $1', [userId]);
         if (deletedRoles.rowCount > 0) {
-            deletedData.push(`✗ ${deletedRoles.rowCount} asignaciones de rol`);
-            totalDeleted += deletedRoles.rowCount;
+            deletedData.push(`${deletedRoles.rowCount} roles asignados`);
         }
-
-        // 7. Borrar luminarias del usuario
-        const deletedLuminarias = await pool.query('DELETE FROM user_luminarias WHERE user_id = $1', [userId]);
-        if (deletedLuminarias.rowCount > 0) {
-            deletedData.push(`✗ Registro de luminarias`);
-            totalDeleted += deletedLuminarias.rowCount;
+        
+        // 7. Borrar perfil de usuario
+        const deletedProfile = await pool.query('DELETE FROM user_profiles WHERE user_id = $1', [userId]);
+        if (deletedProfile.rowCount > 0) {
+            deletedData.push(`Perfil de usuario`);
         }
-
-        // 8. Borrar asignaciones administrativas
-        const deletedAssignments = await pool.query('DELETE FROM admin_assignments WHERE user_id = $1 OR admin_id = $1', [userId]);
-        if (deletedAssignments.rowCount > 0) {
-            deletedData.push(`✗ ${deletedAssignments.rowCount} asignaciones administrativas`);
-            totalDeleted += deletedAssignments.rowCount;
-        }
-
-        // 9. Finalmente, borrar el usuario
+        
+        // 8. Finalmente borrar el usuario
         const deletedUser = await pool.query('DELETE FROM users WHERE id = $1', [userId]);
-        if (deletedUser.rowCount > 0) {
-            deletedData.push(`✗ Cuenta de usuario`);
-            totalDeleted += deletedUser.rowCount;
-        }
-
-        console.log(`User ${nickname} (ID: ${userId}) completely deleted by admin ${adminUserId}`);
-
+        deletedData.push(`Cuenta de usuario: ${user.nickname}`);
+        
+        console.log(`User ${userId} (${user.nickname}) deleted successfully`);
+        
         res.json({
             success: true,
-            message: `Usuario "${nickname}" borrado completamente`,
+            message: `Usuario ${user.nickname} borrado exitosamente`,
             deleted_data: deletedData,
-            total_deleted: totalDeleted,
-            deleted_by: req.user.nickname || `Admin ID: ${adminUserId}`,
-            timestamp: new Date().toISOString()
+            total_deleted: deletedData.length
         });
-
+        
     } catch (error) {
         console.error('Error deleting user:', error);
         res.status(500).json({ 
             error: 'Error borrando usuario',
             details: error.message 
         });
+    }
+});
+
+// Buscar usuarios
+router.get('/search-users', authenticateToken, async (req, res) => {
+    try {
+        const { q } = req.query;
+        
+        if (!q || q.trim().length === 0) {
+            return res.json({ users: [] });
+        }
+        
+        const searchTerm = `%${q.trim()}%`;
+        const users = await pool.query(`
+            SELECT id, nickname, COALESCE(email, 'Sin email') as email
+            FROM users 
+            WHERE nickname ILIKE $1 
+            ORDER BY nickname 
+            LIMIT 10
+        `, [searchTerm]);
+        
+        res.json({
+            users: users.rows,
+            count: users.rows.length
+        });
+        
+    } catch (error) {
+        console.error('Error searching users:', error);
+        res.status(500).json({ error: 'Error buscando usuarios', details: error.message });
     }
 });
 
