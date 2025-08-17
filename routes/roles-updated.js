@@ -68,7 +68,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                 LEFT JOIN user_profiles up ON u.id = up.user_id
                 LEFT JOIN user_roles ur ON u.id = ur.user_id
                 LEFT JOIN roles r ON ur.role_id = r.id
-                WHERE r.name IN ('administrador_principal', 'administrador_secundario')
+                WHERE u.nickname = 'AdminPrincipal' OR r.name IN ('administrador_principal', 'administrador_secundario')
                 ORDER BY CASE WHEN r.name = 'administrador_principal' THEN 0 ELSE 1 END, u.nickname
                 LIMIT 15
             `);
@@ -99,14 +99,11 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                     0 as luminarias_gastadas,
                     0 as luminarias_abonadas,
                     0 as luminarias_compradas,
-                    COALESCE(r.name, 'creador_contenido') as role_name
+                    'creador_contenido' as role_name
                 FROM users u
-                LEFT JOIN user_profiles up ON u.id = up.user_id
                 LEFT JOIN blocks b ON u.id = b.creator_id
-                LEFT JOIN user_roles ur ON u.id = ur.user_id
-                LEFT JOIN roles r ON ur.role_id = r.id
                 WHERE b.id IS NOT NULL AND u.nickname != 'AdminPrincipal'
-                GROUP BY u.id, u.nickname, u.email, r.name
+                GROUP BY u.id, u.nickname, u.email
                 ORDER BY COUNT(b.id) DESC, u.nickname
                 LIMIT 20
             `);
