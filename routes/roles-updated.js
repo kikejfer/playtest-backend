@@ -29,6 +29,92 @@ const requireAdminRole = async (req, res, next) => {
     }
 };
 
+// Panel de Administrador Principal - Vista completa TEMPORAL FIX
+router.get('/admin-principal-panel-temp', authenticateToken, async (req, res) => {
+    try {
+        console.log('Using temporary forced panel data...');
+        
+        // AdminPrincipal forzado
+        const adminSecundarios = [{
+            id: 14,
+            nickname: 'AdminPrincipal',
+            email: 'admin@playtest.com',
+            first_name: '',
+            last_name: '',
+            assigned_creators_count: 0,
+            total_blocks_assigned: 0,
+            total_questions_assigned: 0,
+            luminarias: 0,
+            role_name: 'administrador_principal'
+        }];
+        
+        // Creadores desde debug query
+        const creadoresQuery = await pool.query(`
+            SELECT DISTINCT
+                u.id,
+                u.nickname,
+                COALESCE(u.email, 'Sin email') as email,
+                '' as first_name,
+                '' as last_name,
+                0 as assigned_admin_id,
+                'Sin asignar' as assigned_admin_nickname,
+                COUNT(b.id) as blocks_created,
+                0 as total_questions,
+                0 as total_users_blocks,
+                0 as luminarias_actuales,
+                'creador_contenido' as role_name
+            FROM users u
+            LEFT JOIN blocks b ON u.id = b.creator_id
+            WHERE b.id IS NOT NULL AND u.nickname != 'AdminPrincipal'
+            GROUP BY u.id, u.nickname, u.email
+            ORDER BY COUNT(b.id) DESC
+            LIMIT 10
+        `);
+        
+        // Usuarios desde consulta simple
+        const usuariosQuery = await pool.query(`
+            SELECT DISTINCT
+                u.id,
+                u.nickname,
+                COALESCE(u.email, 'Sin email') as email,
+                '' as first_name,
+                '' as last_name,
+                0 as assigned_admin_id,
+                'Sin asignar' as assigned_admin_nickname,
+                0 as blocks_loaded,
+                0 as luminarias_actuales,
+                'usuario' as role_name
+            FROM users u
+            WHERE u.nickname != 'AdminPrincipal' 
+              AND NOT EXISTS (
+                  SELECT 1 FROM blocks b WHERE b.creator_id = u.id
+              )
+            ORDER BY u.nickname
+            LIMIT 20
+        `);
+        
+        const availableAdmins = await pool.query(`
+            SELECT DISTINCT u.id, u.nickname 
+            FROM users u 
+            ORDER BY u.nickname 
+            LIMIT 10
+        `);
+
+        res.json({
+            adminSecundarios: adminSecundarios,
+            profesoresCreadores: creadoresQuery.rows,
+            usuarios: usuariosQuery.rows,
+            availableAdmins: availableAdmins.rows,
+            temp_fix: true,
+            timestamp: new Date().toISOString()
+        });
+        
+    } catch (error) {
+        console.error('Error in temp panel:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Panel de Administrador Principal - Vista completa
 router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
     try {
