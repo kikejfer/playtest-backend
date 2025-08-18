@@ -207,6 +207,80 @@ router.delete('/delete-user/:userId', authenticateToken, async (req, res) => {
     }
 });
 
+// Asignar administrador secundario
+router.post('/add-admin-secundario', authenticateToken, async (req, res) => {
+    try {
+        const { userId } = req.body;
+        console.log(`Request to add admin secundario: ${userId}`);
+        
+        if (!userId) {
+            return res.status(400).json({ error: 'userId es requerido' });
+        }
+        
+        // Verificar que el usuario existe
+        const userCheck = await pool.query('SELECT id, nickname, email FROM users WHERE id = $1', [userId]);
+        if (userCheck.rows.length === 0) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+        
+        const user = userCheck.rows[0];
+        
+        // Verificar si ya es admin secundario (opcional - podemos permitir múltiples roles)
+        const existingRole = await pool.query(`
+            SELECT ur.id FROM user_roles ur
+            INNER JOIN roles r ON ur.role_id = r.id
+            WHERE ur.user_id = $1 AND r.name = 'administrador_secundario'
+        `, [userId]);
+        
+        if (existingRole.rows.length > 0) {
+            return res.status(409).json({ error: 'El usuario ya es administrador secundario' });
+        }
+        
+        // Buscar o crear el rol de administrador_secundario
+        let roleResult = await pool.query('SELECT id FROM roles WHERE name = $1', ['administrador_secundario']);
+        let roleId;
+        
+        if (roleResult.rows.length === 0) {
+            // Crear el rol si no existe
+            const newRole = await pool.query(`
+                INSERT INTO roles (name, description) 
+                VALUES ($1, $2) 
+                RETURNING id
+            `, ['administrador_secundario', 'Administrador Secundario']);
+            roleId = newRole.rows[0].id;
+            console.log(`Created new role administrador_secundario with id ${roleId}`);
+        } else {
+            roleId = roleResult.rows[0].id;
+        }
+        
+        // Asignar el rol al usuario
+        await pool.query(`
+            INSERT INTO user_roles (user_id, role_id) 
+            VALUES ($1, $2)
+        `, [userId, roleId]);
+        
+        console.log(`User ${userId} (${user.nickname}) assigned as admin secundario`);
+        
+        res.json({
+            success: true,
+            message: `${user.nickname} asignado como Administrador Secundario`,
+            user: {
+                id: user.id,
+                nickname: user.nickname,
+                email: user.email,
+                role: 'administrador_secundario'
+            }
+        });
+        
+    } catch (error) {
+        console.error('Error adding admin secundario:', error);
+        res.status(500).json({ 
+            error: 'Error asignando administrador secundario',
+            details: error.message 
+        });
+    }
+});
+
 // Buscar usuarios
 router.get('/search-users', authenticateToken, async (req, res) => {
     try {

@@ -1177,6 +1177,152 @@ router.post('/conversions/:conversion_id/review', authenticateToken, async (req,
     }
 });
 
+// ========== ENDPOINTS DE RETIRO MEJORADO ==========
+
+// Endpoint mejorado para retiro directo
+router.post('/withdraw', authenticateToken, async (req, res) => {
+    const client = await pool.connect();
+    
+    try {
+        await client.query('BEGIN');
+        
+        const { 
+            amount, 
+            withdrawal_type = 'conversion', 
+            payment_method, 
+            payment_details = {},
+            notes 
+        } = req.body;
+        
+        // Validaciones
+        if (!amount || amount <= 0) {
+            return res.status(400).json({ error: 'Cantidad inválida' });
+        }
+        
+        if (!payment_method) {
+            return res.status(400).json({ error: 'Método de pago requerido' });
+        }
+        
+        // Verificar balance suficiente
+        const balanceResult = await client.query(
+            'SELECT * FROM get_user_luminarias_stats($1)',
+            [req.user.id]
+        );
+        
+        const currentBalance = balanceResult.rows[0]?.current_balance || 0;
+        if (currentBalance < amount) {
+            return res.status(400).json({ error: 'Balance insuficiente' });
+        }
+        
+        // Procesar retiro según tipo
+        let processingFee = 0;
+        let finalAmount = amount;
+        
+        if (withdrawal_type === 'conversion') {
+            // Conversión a dinero real - requiere nivel mínimo
+            const userLevel = await client.query(`
+                SELECT ul.current_level_id, ld.level_name 
+                FROM user_levels ul
+                JOIN level_definitions ld ON ul.current_level_id = ld.id
+                WHERE ul.user_id = $1 AND ul.level_type = 'creator'
+            `, [req.user.id]);
+            
+            if (userLevel.rows.length === 0 || !['constructor', 'orador', 'visionario'].includes(userLevel.rows[0].level_name.toLowerCase())) {
+                return res.status(403).json({ 
+                    error: 'Retiro a dinero real requiere nivel Constructor+ en creador' 
+                });
+            }
+            
+            processingFee = Math.floor(amount * 0.05); // 5% fee
+            finalAmount = amount - processingFee;
+        }
+        
+        // Crear transacción de retiro
+        const transactionId = await client.query(
+            'SELECT process_luminarias_transaction($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)',
+            [
+                req.user.id,
+                'spend',
+                amount,
+                'user',
+                'withdrawal',
+                withdrawal_type,
+                'withdraw_funds',
+                `Retiro ${withdrawal_type}: ${amount} Luminarias (${finalAmount} final, fee: ${processingFee})`,
+                null,
+                'withdrawal_request',
+                JSON.stringify({
+                    withdrawal_type,
+                    payment_method,
+                    payment_details,
+                    processing_fee: processingFee,
+                    final_amount: finalAmount,
+                    notes
+                })
+            ]
+        );
+        
+        // Crear registro de retiro
+        const withdrawalResult = await client.query(`
+            INSERT INTO luminarias_withdrawals (
+                user_id, transaction_id, original_amount, processing_fee, final_amount,
+                withdrawal_type, payment_method, payment_details, notes, status
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending')
+            RETURNING *
+        `, [
+            req.user.id,
+            transactionId.rows[0].process_luminarias_transaction,
+            amount,
+            processingFee,
+            finalAmount,
+            withdrawal_type,
+            payment_method,
+            JSON.stringify(payment_details),
+            notes
+        ]);
+        
+        await client.query('COMMIT');
+        
+        res.json({
+            message: 'Solicitud de retiro procesada exitosamente',
+            withdrawal: withdrawalResult.rows[0],
+            estimated_processing_time: withdrawal_type === 'conversion' ? '5-7 días hábiles' : '2-3 días hábiles'
+        });
+        
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Error en retiro:', error);
+        
+        if (error.message.includes('Saldo insuficiente')) {
+            return res.status(400).json({ error: error.message });
+        }
+        
+        res.status(500).json({ error: 'Error procesando retiro' });
+    } finally {
+        client.release();
+    }
+});
+
+// Obtener mis retiros
+router.get('/withdrawals', authenticateToken, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT 
+                lw.*,
+                lt.created_at as transaction_date
+            FROM luminarias_withdrawals lw
+            LEFT JOIN luminarias_transactions lt ON lw.transaction_id = lt.id
+            WHERE lw.user_id = $1
+            ORDER BY lw.created_at DESC
+        `, [req.user.id]);
+        
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Error obteniendo retiros:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
 // ========== ENDPOINTS DE CONVERSIÓN A DINERO REAL ==========
 
 // Solicitar conversión de Luminarias a dinero real

@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel de Niveles - PLAYTEST</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0D1B2A 0%, #1B263B 50%, #2D3748 100%);
+            min-height: 100vh;
+            color: #E0E1DD;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding: 30px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .header h1 {
+            font-size: 3rem;
+            background: linear-gradient(45deg, #FF6B6B, #4ECDC4, #45B7D1, #96CEB4);
+            background-size: 300% 300%;
+            animation: gradient 3s ease infinite;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+
+        @keyframes gradient {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        .header p {
+            font-size: 1.2rem;
+            opacity: 0.8;
+        }
+
+        .tabs {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 30px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 8px;
+        }
+
+        .tab {
+            background: transparent;
+            border: none;
+            color: #E0E1DD;
+            padding: 15px 30px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 1rem;
+            font-weight: 500;
+        }
+
+        .tab.active {
+            background: linear-gradient(45deg, #FF6B6B, #4ECDC4);
+            box-shadow: 0 4px 15px rgba(255, 107, 107, 0.3);
+        }
+
+        .tab:hover:not(.active) {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 25px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.3s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .stat-number {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 1rem;
+            opacity: 0.7;
+        }
+
+        .levels-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 25px;
+            margin-bottom: 30px;
+        }
+
+        .level-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 20px;
+            padding: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .level-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .level-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, var(--level-color), rgba(255, 255, 255, 0.3));
+        }
+
+        .level-badge {
+            display: inline-flex;
+            align-items: center;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 8px 16px;
+            border-radius: 25px;
+            margin-bottom: 15px;
+            font-size: 0.9rem;
+            border: 1px solid var(--level-color);
+        }
+
+        .level-badge .emoji {
+            margin-right: 8px;
+            font-size: 1.2rem;
+        }
+
+        .level-title {
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: var(--level-color);
+        }
+
+        .level-description {
+            opacity: 0.8;
+            margin-bottom: 15px;
+            line-height: 1.6;
+        }
+
+        .level-progress {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 15px;
+            margin-top: 15px;
+        }
+
+        .progress-bar {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            height: 8px;
+            margin: 10px 0;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--level-color), rgba(255, 255, 255, 0.8));
+            border-radius: 10px;
+            transition: width 0.5s ease;
+        }
+
+        .badges-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 20px;
+        }
+
+        .badge-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 20px;
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .badge-card.earned {
+            background: rgba(255, 215, 0, 0.1);
+            border-color: rgba(255, 215, 0, 0.3);
+        }
+
+        .badge-card.locked {
+            opacity: 0.5;
+            filter: grayscale(70%);
+        }
+
+        .badge-icon {
+            font-size: 3rem;
+            margin-bottom: 10px;
+            display: block;
+        }
+
+        .badge-name {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .badge-description {
+            font-size: 0.9rem;
+            opacity: 0.7;
+            line-height: 1.4;
+        }
+
+        .rarity-legendary { border-color: #FFD700; }
+        .rarity-epic { border-color: #A020F0; }
+        .rarity-rare { border-color: #FF4500; }
+        .rarity-uncommon { border-color: #32CD32; }
+        .rarity-common { border-color: #87CEEB; }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            font-size: 1.2rem;
+            opacity: 0.7;
+        }
+
+        .error {
+            background: rgba(220, 53, 69, 0.1);
+            border: 1px solid rgba(220, 53, 69, 0.3);
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            color: #ff6b6b;
+        }
+
+        .refresh-btn {
+            background: linear-gradient(45deg, #FF6B6B, #4ECDC4);
+            border: none;
+            color: white;
+            padding: 12px 25px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1rem;
+            margin: 20px auto;
+            display: block;
+            transition: all 0.3s ease;
+        }
+
+        .refresh-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 5px 15px rgba(255, 107, 107, 0.4);
+        }
+
+        .payment-history {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 25px;
+            margin-top: 30px;
+        }
+
+        .payment-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .payment-item:last-child {
+            border-bottom: none;
+        }
+
+        .payment-amount {
+            font-weight: bold;
+            color: #4ECDC4;
+        }
+
+        .leaderboard {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 25px;
+        }
+
+        .leaderboard-item {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            background: rgba(255, 255, 255, 0.05);
+            transition: all 0.3s ease;
+        }
+
+        .leaderboard-item:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .rank {
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin-right: 20px;
+            min-width: 40px;
+        }
+
+        .rank.first { color: #FFD700; }
+        .rank.second { color: #C0C0C0; }
+        .rank.third { color: #CD7F32; }
+
+        .user-info {
+            flex: 1;
+        }
+
+        .user-stats {
+            display: flex;
+            gap: 20px;
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            .levels-grid,
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .tabs {
+                flex-direction: column;
+            }
+            
+            .tab {
+                margin-bottom: 5px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏆 Panel de Niveles PLAYTEST</h1>
+            <p>Progresa, compite y alcanza la maestría</p>
+        </div>
+
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('overview')">📊 Resumen</button>
+            <button class="tab" onclick="switchTab('my-levels')">🎯 Mis Niveles</button>
+            <button class="tab" onclick="switchTab('badges')">🏆 Badges</button>
+            <button class="tab" onclick="switchTab('payments')">💰 Pagos</button>
+            <button class="tab" onclick="switchTab('rankings')">🏅 Rankings</button>
+        </div>
+
+        <div id="overview" class="tab-content active">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-number" id="total-users">-</div>
+                    <div class="stat-label">Usuarios con Niveles</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="active-creators">-</div>
+                    <div class="stat-label">Creadores Activos</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="active-teachers">-</div>
+                    <div class="stat-label">Profesores Activos</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="total-luminarias">-</div>
+                    <div class="stat-label">Luminarias Distribuidas</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="my-levels" class="tab-content">
+            <div class="levels-grid" id="user-levels-grid">
+                <div class="loading">Cargando tus niveles...</div>
+            </div>
+        </div>
+
+        <div id="badges" class="tab-content">
+            <div class="badges-grid" id="badges-grid">
+                <div class="loading">Cargando badges...</div>
+            </div>
+        </div>
+
+        <div id="payments" class="tab-content">
+            <div class="payment-history" id="payment-history">
+                <div class="loading">Cargando historial de pagos...</div>
+            </div>
+        </div>
+
+        <div id="rankings" class="tab-content">
+            <div class="leaderboard" id="rankings-content">
+                <div class="loading">Cargando rankings...</div>
+            </div>
+        </div>
+
+        <button class="refresh-btn" onclick="loadAllData()">🔄 Actualizar Datos</button>
+    </div>
+
+    <script>
+        // Configuración
+        const API_BASE = window.location.origin + '/api';
+        let currentUser = null;
+
+        // Variables globales para datos
+        let dashboardData = null;
+        let userLevels = null;
+        let userBadges = null;
+        let paymentHistory = null;
+
+        // Inicialización
+        document.addEventListener('DOMContentLoaded', function() {
+            checkAuth();
+        });
+
+        function checkAuth() {
+            const token = localStorage.getItem('token');
+            if (!token) {
+                window.location.href = '/login.html';
+                return;
+            }
+            
+            // Decodificar token para obtener info del usuario
+            try {
+                const payload = JSON.parse(atob(token.split('.')[1]));
+                currentUser = payload;
+                loadAllData();
+            } catch (error) {
+                console.error('Error decodificando token:', error);
+                localStorage.removeItem('token');
+                window.location.href = '/login.html';
+            }
+        }
+
+        async function apiRequest(endpoint, options = {}) {
+            const token = localStorage.getItem('token');
+            const response = await fetch(`${API_BASE}${endpoint}`, {
+                ...options,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                    ...options.headers
+                }
+            });
+
+            if (!response.ok) {
+                if (response.status === 401) {
+                    localStorage.removeItem('token');
+                    window.location.href = '/login.html';
+                    return;
+                }
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            return response.json();
+        }
+
+        async function loadAllData() {
+            try {
+                // Cargar datos del dashboard
+                const dashboard = await apiRequest('/levels/distribution');
+                dashboardData = dashboard;
+                updateOverview();
+
+                // Cargar niveles del usuario
+                const levels = await apiRequest('/levels/my-levels');
+                userLevels = levels.levels;
+                updateMyLevels();
+
+                // Cargar badges (simulado por ahora)
+                userBadges = await loadUserBadges();
+                updateBadges();
+
+                // Cargar historial de pagos
+                const payments = await apiRequest('/levels/payments');
+                paymentHistory = payments.payment_history;
+                updatePayments();
+
+                // Cargar rankings
+                await loadRankings();
+
+            } catch (error) {
+                console.error('Error cargando datos:', error);
+                showError('Error cargando datos: ' + error.message);
+            }
+        }
+
+        function updateOverview() {
+            if (!dashboardData) return;
+
+            // Calcular estadísticas generales
+            const stats = {
+                total_users: 0,
+                active_creators: 0,
+                active_teachers: 0,
+                total_luminarias: 0
+            };
+
+            // Contar usuarios por tipo
+            Object.values(dashboardData.level_distribution).forEach(levels => {
+                levels.forEach(level => {
+                    if (level.level_name.includes('Creador') || level.level_name.includes('Semilla') || 
+                        level.level_name.includes('Chispa') || level.level_name.includes('Constructor') ||
+                        level.level_name.includes('Orador') || level.level_name.includes('Visionario')) {
+                        stats.active_creators += level.user_count;
+                    } else if (level.level_name.includes('Profesor') || level.level_name.includes('Guía') ||
+                              level.level_name.includes('Instructor') || level.level_name.includes('Consejero') ||
+                              level.level_name.includes('Erudito') || level.level_name.includes('Maestro')) {
+                        stats.active_teachers += level.user_count;
+                    }
+                    stats.total_users += level.user_count;
+                    stats.total_luminarias += level.avg_weekly_payment * level.user_count * 4; // Estimado mensual
+                });
+            });
+
+            // Actualizar elementos
+            document.getElementById('total-users').textContent = stats.total_users.toLocaleString();
+            document.getElementById('active-creators').textContent = stats.active_creators.toLocaleString();
+            document.getElementById('active-teachers').textContent = stats.active_teachers.toLocaleString();
+            document.getElementById('total-luminarias').textContent = Math.floor(stats.total_luminarias).toLocaleString();
+        }
+
+        function updateMyLevels() {
+            const container = document.getElementById('user-levels-grid');
+            if (!userLevels) {
+                container.innerHTML = '<div class="loading">No hay datos de niveles disponibles</div>';
+                return;
+            }
+
+            let html = '';
+
+            // Nivel de creador
+            if (userLevels.creator) {
+                html += createLevelCard('creator', userLevels.creator);
+            }
+
+            // Nivel de profesor
+            if (userLevels.teacher) {
+                html += createLevelCard('teacher', userLevels.teacher);
+            }
+
+            // Niveles de usuario por bloque
+            if (userLevels.user && userLevels.user.length > 0) {
+                userLevels.user.forEach(userLevel => {
+                    html += createLevelCard('user', userLevel);
+                });
+            }
+
+            if (!html) {
+                html = '<div class="loading">Aún no tienes niveles asignados. ¡Comienza a participar para obtener tu primer nivel!</div>';
+            }
+
+            container.innerHTML = html;
+        }
+
+        function createLevelCard(type, levelData) {
+            const colors = {
+                'Aprendiz': '#6B7280', 'Explorador': '#3B82F6', 'Estratega': '#8B5CF6',
+                'Sabio': '#F59E0B', 'Gran Maestro': '#EF4444',
+                'Semilla': '#10B981', 'Chispa': '#F59E0B', 'Constructor': '#3B82F6',
+                'Orador': '#8B5CF6', 'Visionario': '#EF4444',
+                'Guía': '#10B981', 'Instructor': '#3B82F6', 'Consejero': '#8B5CF6',
+                'Erudito': '#F59E0B', 'Maestro Jedi': '#EF4444'
+            };
+
+            const emojis = {
+                creator: '🎨', teacher: '👨‍🏫', user: '🎯'
+            };
+
+            const typeNames = {
+                creator: 'Creador', teacher: 'Profesor', user: 'Usuario'
+            };
+
+            const color = colors[levelData.level_name] || '#6B7280';
+
+            return `
+                <div class="level-card" style="--level-color: ${color}">
+                    <div class="level-badge">
+                        <span class="emoji">${emojis[type]}</span>
+                        ${typeNames[type]}${levelData.block_title ? ` - ${levelData.block_title}` : ''}
+                    </div>
+                    <div class="level-title">${levelData.level_name}</div>
+                    <div class="level-description">${levelData.description || 'Nivel alcanzado con dedicación y esfuerzo'}</div>
+                    
+                    ${levelData.weekly_luminarias ? `
+                        <div class="level-progress">
+                            <strong>💰 ${levelData.weekly_luminarias} Luminarias/semana</strong>
+                        </div>
+                    ` : ''}
+                    
+                    ${levelData.current_metrics ? `
+                        <div class="level-progress">
+                            ${type === 'user' ? `
+                                <div>📊 Consolidación: ${levelData.current_metrics.consolidation || 0}%</div>
+                                <div class="progress-bar">
+                                    <div class="progress-fill" style="width: ${levelData.current_metrics.consolidation || 0}%"></div>
+                                </div>
+                            ` : type === 'creator' ? `
+                                <div>👥 Usuarios activos: ${levelData.current_metrics.active_users || 0}</div>
+                            ` : `
+                                <div>🎓 Estudiantes activos: ${levelData.current_metrics.active_students || 0}</div>
+                            `}
+                        </div>
+                    ` : ''}
+                    
+                    <div style="margin-top: 15px; font-size: 0.9rem; opacity: 0.7;">
+                        Alcanzado: ${new Date(levelData.achieved_at).toLocaleDateString()}
+                    </div>
+                </div>
+            `;
+        }
+
+        async function loadUserBadges() {
+            // Simulación de badges hasta que esté implementado completamente
+            return {
+                earned: [
+                    { name: 'Primer Paso', description: 'Has comenzado tu viaje', rarity: 'common', icon: '🌟' },
+                    { name: 'Explorador Curioso', description: 'Demuestras curiosidad', rarity: 'common', icon: '🧭' }
+                ],
+                available: [
+                    { name: 'Mente Estratégica', description: 'Domina las estrategias', rarity: 'uncommon', icon: '👑' },
+                    { name: 'Sabiduría Ancestral', description: 'Conocimiento profundo', rarity: 'rare', icon: '🦉' },
+                    { name: 'Gran Maestro', description: 'Maestría absoluta', rarity: 'legendary', icon: '⭐' }
+                ]
+            };
+        }
+
+        function updateBadges() {
+            const container = document.getElementById('badges-grid');
+            if (!userBadges) {
+                container.innerHTML = '<div class="loading">No hay badges disponibles</div>';
+                return;
+            }
+
+            let html = '';
+
+            // Badges obtenidos
+            userBadges.earned.forEach(badge => {
+                html += `
+                    <div class="badge-card earned rarity-${badge.rarity}">
+                        <div class="badge-icon">${badge.icon}</div>
+                        <div class="badge-name">${badge.name}</div>
+                        <div class="badge-description">${badge.description}</div>
+                        <div style="margin-top: 10px; font-size: 0.8rem; color: #4ECDC4;">✓ Obtenido</div>
+                    </div>
+                `;
+            });
+
+            // Badges disponibles
+            userBadges.available.forEach(badge => {
+                html += `
+                    <div class="badge-card locked rarity-${badge.rarity}">
+                        <div class="badge-icon">${badge.icon}</div>
+                        <div class="badge-name">${badge.name}</div>
+                        <div class="badge-description">${badge.description}</div>
+                        <div style="margin-top: 10px; font-size: 0.8rem; opacity: 0.5;">🔒 Bloqueado</div>
+                    </div>
+                `;
+            });
+
+            container.innerHTML = html;
+        }
+
+        function updatePayments() {
+            const container = document.getElementById('payment-history');
+            
+            if (!paymentHistory || paymentHistory.length === 0) {
+                container.innerHTML = '<div class="loading">No hay historial de pagos disponible</div>';
+                return;
+            }
+
+            let html = '<h3 style="margin-bottom: 20px;">💰 Historial de Pagos</h3>';
+            
+            paymentHistory.forEach(payment => {
+                html += `
+                    <div class="payment-item">
+                        <div>
+                            <div><strong>${payment.level_name}</strong></div>
+                            <div style="font-size: 0.9rem; opacity: 0.7;">
+                                Semana del ${new Date(payment.week_start_date).toLocaleDateString()}
+                            </div>
+                        </div>
+                        <div class="payment-amount">+${payment.total_amount} L</div>
+                    </div>
+                `;
+            });
+
+            container.innerHTML = html;
+        }
+
+        async function loadRankings() {
+            try {
+                const rankings = await apiRequest('/levels/rankings/creator?limit=10');
+                updateRankings(rankings.ranking);
+            } catch (error) {
+                document.getElementById('rankings-content').innerHTML = 
+                    '<div class="error">Error cargando rankings</div>';
+            }
+        }
+
+        function updateRankings(rankings) {
+            const container = document.getElementById('rankings-content');
+            
+            if (!rankings || rankings.length === 0) {
+                container.innerHTML = '<div class="loading">No hay rankings disponibles</div>';
+                return;
+            }
+
+            let html = '<h3 style="margin-bottom: 20px;">🏅 Top Creadores</h3>';
+            
+            rankings.forEach((user, index) => {
+                const rankClass = index === 0 ? 'first' : index === 1 ? 'second' : index === 2 ? 'third' : '';
+                
+                html += `
+                    <div class="leaderboard-item">
+                        <div class="rank ${rankClass}">#${index + 1}</div>
+                        <div class="user-info">
+                            <div><strong>${user.nickname}</strong></div>
+                            <div class="user-stats">
+                                <span>📊 Nivel: ${user.level_name}</span>
+                                <span>👥 ${user.active_users || 0} usuarios activos</span>
+                                <span>💰 ${user.total_earned || 0} L ganadas</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            container.innerHTML = html;
+        }
+
+        function switchTab(tabName) {
+            // Actualizar tabs
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelector(`[onclick="switchTab('${tabName}')"]`).classList.add('active');
+
+            // Actualizar contenido
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById(tabName).classList.add('active');
+        }
+
+        function showError(message) {
+            console.error(message);
+            // Podrías mostrar un toast o modal de error aquí
+        }
+    </script>
+</body>
+</html>
