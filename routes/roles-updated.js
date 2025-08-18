@@ -111,21 +111,52 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
         
         const blockCreatorIds = new Set(usersWithBlocks.rows.map(u => u.id));
         
-        // AdminPrincipal como administrador
-        const adminSecundarios = allUsers.rows
-            .filter(user => user.nickname === 'AdminPrincipal')
-            .map(user => ({
-                id: user.id,
-                nickname: user.nickname,
-                email: user.email,
-                first_name: '', last_name: '',
-                assigned_creators_count: 0, total_blocks_assigned: 0, total_questions_assigned: 0, luminarias: 0,
-                role_name: 'administrador_principal'
-            }));
+        // Obtener usuarios con roles administrativos
+        const adminUsers = await pool.query(`
+            SELECT DISTINCT 
+                u.id, 
+                u.nickname, 
+                COALESCE(u.email, 'Sin email') as email,
+                r.name as role_name
+            FROM users u
+            INNER JOIN user_roles ur ON u.id = ur.user_id
+            INNER JOIN roles r ON ur.role_id = r.id
+            WHERE r.name IN ('administrador_principal', 'administrador_secundario')
+            ORDER BY u.id
+        `);
+        
+        // AdminPrincipal y administradores secundarios
+        const adminSecundarios = adminUsers.rows.map(user => ({
+            id: user.id,
+            nickname: user.nickname,
+            email: user.email,
+            first_name: '', last_name: '',
+            assigned_creators_count: 0, total_blocks_assigned: 0, total_questions_assigned: 0, luminarias: 0,
+            role_name: user.role_name
+        }));
+        
+        // Si AdminPrincipal no tiene rol asignado, añadirlo manualmente
+        const adminPrincipalExists = adminSecundarios.some(admin => admin.nickname === 'AdminPrincipal');
+        if (!adminPrincipalExists) {
+            const adminPrincipal = allUsers.rows.find(user => user.nickname === 'AdminPrincipal');
+            if (adminPrincipal) {
+                adminSecundarios.push({
+                    id: adminPrincipal.id,
+                    nickname: adminPrincipal.nickname,
+                    email: adminPrincipal.email,
+                    first_name: '', last_name: '',
+                    assigned_creators_count: 0, total_blocks_assigned: 0, total_questions_assigned: 0, luminarias: 0,
+                    role_name: 'administrador_principal'
+                });
+            }
+        }
 
-        // Usuarios con bloques como creadores
+        // IDs de usuarios con roles administrativos
+        const adminIds = new Set(adminSecundarios.map(admin => admin.id));
+        
+        // Usuarios con bloques como creadores (excluyendo administradores)
         const profesoresCreadores = usersWithBlocks.rows
-            .filter(user => user.nickname !== 'AdminPrincipal')
+            .filter(user => !adminIds.has(user.id))
             .map(user => ({
                 id: user.id, nickname: user.nickname, email: user.email,
                 first_name: '', last_name: '', assigned_admin_id: 0, assigned_admin_nickname: 'Sin asignar',
@@ -136,9 +167,9 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                 role_name: 'creador_contenido'
             }));
 
-        // Usuarios sin bloques
+        // Usuarios sin bloques (excluyendo administradores y creadores)
         const usuarios = allUsers.rows
-            .filter(user => user.nickname !== 'AdminPrincipal' && !blockCreatorIds.has(user.id))
+            .filter(user => !adminIds.has(user.id) && !blockCreatorIds.has(user.id))
             .map(user => ({
                 id: user.id, nickname: user.nickname, email: user.email,
                 first_name: '', last_name: '', assigned_admin_id: 0, assigned_admin_nickname: 'Sin asignar', blocks_loaded: 0,
@@ -280,7 +311,15 @@ router.post('/add-admin-secundario', authenticateToken, async (req, res) => {
         `, [userId]);
         
         if (existingRole.rows.length > 0) {
-            return res.status(409).json({ error: 'El usuario ya es administrador secundario' });
+            return res.status(409).json({ 
+                error: 'El usuario ya es administrador secundario',
+                user: {
+                    id: user.id,
+                    nickname: user.nickname,
+                    email: user.email,
+                    current_role: 'administrador_secundario'
+                }
+            });
         }
         
         // Buscar o crear el rol de administrador_secundario
@@ -459,6 +498,68 @@ router.get('/profesores/:profesorId/bloques', authenticateToken, async (req, res
         console.error('Error getting profesor blocks:', error);
         res.status(500).json({ 
             error: 'Error obteniendo bloques del profesor',
+            details: error.message 
+        });
+    }
+});
+
+// Obtener temas de un bloque
+router.get('/bloques/:blockId/temas', authenticateToken, async (req, res) => {
+    try {
+        const { blockId } = req.params;
+        console.log(`Request to get topics for block ${blockId}`);
+        
+        // Para simplificar, devolver datos de ejemplo ya que la estructura de temas puede variar
+        // En una implementación real, esto consultaría la tabla de temas
+        res.json({
+            success: true,
+            temas: [
+                {
+                    topic: 'Tema General',
+                    num_preguntas: 5
+                }
+            ],
+            block_id: blockId
+        });
+        
+    } catch (error) {
+        console.error('Error getting block topics:', error);
+        res.status(500).json({ 
+            error: 'Error obteniendo temas del bloque',
+            details: error.message 
+        });
+    }
+});
+
+// Obtener preguntas de un tema
+router.get('/temas/:topicName/preguntas', authenticateToken, async (req, res) => {
+    try {
+        const { topicName } = req.params;
+        console.log(`Request to get questions for topic ${topicName}`);
+        
+        // Para simplificar, devolver datos de ejemplo
+        // En una implementación real, esto consultaría las preguntas por tema
+        res.json({
+            success: true,
+            preguntas: [
+                {
+                    text_question: 'Pregunta de ejemplo',
+                    difficulty: 3,
+                    explanation: 'Esta es una explicación de ejemplo',
+                    answers: [
+                        { text: 'Respuesta correcta', is_correct: true },
+                        { text: 'Respuesta incorrecta 1', is_correct: false },
+                        { text: 'Respuesta incorrecta 2', is_correct: false }
+                    ]
+                }
+            ],
+            topic_name: decodeURIComponent(topicName)
+        });
+        
+    } catch (error) {
+        console.error('Error getting topic questions:', error);
+        res.status(500).json({ 
+            error: 'Error obteniendo preguntas del tema',
             details: error.message 
         });
     }
