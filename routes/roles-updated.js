@@ -126,13 +126,54 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
             ORDER BY u.id
         `);
         
+        // Contar usuarios asignados a cada administrador
+        let adminUserCounts = {};
+        let adminBlockCounts = {};
+        let adminQuestionCounts = {};
+        
+        try {
+            // Contar usuarios asignados por administrador
+            const userCounts = await pool.query(`
+                SELECT admin_id, COUNT(*) as user_count
+                FROM admin_assignments
+                GROUP BY admin_id
+            `);
+            
+            userCounts.rows.forEach(row => {
+                adminUserCounts[row.admin_id] = parseInt(row.user_count) || 0;
+            });
+            
+            // Contar bloques de usuarios asignados por administrador
+            const blockCounts = await pool.query(`
+                SELECT aa.admin_id, COUNT(DISTINCT b.id) as block_count, COALESCE(SUM(q_count.question_count), 0) as question_count
+                FROM admin_assignments aa
+                JOIN blocks b ON aa.assigned_user_id = b.creator_id
+                LEFT JOIN (
+                    SELECT block_id, COUNT(*) as question_count 
+                    FROM questions 
+                    GROUP BY block_id
+                ) q_count ON b.id = q_count.block_id
+                GROUP BY aa.admin_id
+            `);
+            
+            blockCounts.rows.forEach(row => {
+                adminBlockCounts[row.admin_id] = parseInt(row.block_count) || 0;
+                adminQuestionCounts[row.admin_id] = parseInt(row.question_count) || 0;
+            });
+        } catch (e) {
+            console.log('Error calculating admin stats, using defaults:', e.message);
+        }
+
         // AdminPrincipal y administradores secundarios
         const adminSecundarios = adminUsers.rows.map(user => ({
             id: user.id,
             nickname: user.nickname,
             email: user.email,
             first_name: '', last_name: '',
-            assigned_creators_count: 0, total_blocks_assigned: 0, total_questions_assigned: 0, luminarias: 0,
+            assigned_creators_count: adminUserCounts[user.id] || 0, 
+            total_blocks_assigned: adminBlockCounts[user.id] || 0, 
+            total_questions_assigned: adminQuestionCounts[user.id] || 0, 
+            luminarias: 0,
             role_name: user.role_name
         }));
         
@@ -146,7 +187,10 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                     nickname: adminPrincipal.nickname,
                     email: adminPrincipal.email,
                     first_name: '', last_name: '',
-                    assigned_creators_count: 0, total_blocks_assigned: 0, total_questions_assigned: 0, luminarias: 0,
+                    assigned_creators_count: adminUserCounts[adminPrincipal.id] || 0, 
+                    total_blocks_assigned: adminBlockCounts[adminPrincipal.id] || 0, 
+                    total_questions_assigned: adminQuestionCounts[adminPrincipal.id] || 0, 
+                    luminarias: 0,
                     role_name: 'administrador_principal'
                 });
             }
