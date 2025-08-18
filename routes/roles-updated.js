@@ -288,15 +288,21 @@ router.delete('/delete-user/:userId', authenticateToken, async (req, res) => {
 // Asignar administrador secundario
 router.post('/add-admin-secundario', authenticateToken, async (req, res) => {
     try {
-        const { userId } = req.body;
-        console.log(`Request to add admin secundario: ${userId}`);
+        const { userId, nickname } = req.body;
+        console.log(`Request to add admin secundario: ${userId || nickname}`);
         
-        if (!userId) {
-            return res.status(400).json({ error: 'userId es requerido' });
+        if (!userId && !nickname) {
+            return res.status(400).json({ error: 'userId o nickname es requerido' });
         }
         
-        // Verificar que el usuario existe
-        const userCheck = await pool.query('SELECT id, nickname, email FROM users WHERE id = $1', [userId]);
+        // Verificar que el usuario existe (por ID o nickname)
+        let userCheck;
+        if (userId) {
+            userCheck = await pool.query('SELECT id, nickname, email FROM users WHERE id = $1', [userId]);
+        } else {
+            userCheck = await pool.query('SELECT id, nickname, email FROM users WHERE nickname = $1', [nickname]);
+        }
+        
         if (userCheck.rows.length === 0) {
             return res.status(404).json({ error: 'Usuario no encontrado' });
         }
@@ -308,7 +314,7 @@ router.post('/add-admin-secundario', authenticateToken, async (req, res) => {
             SELECT ur.id FROM user_roles ur
             INNER JOIN roles r ON ur.role_id = r.id
             WHERE ur.user_id = $1 AND r.name = 'administrador_secundario'
-        `, [userId]);
+        `, [user.id]);
         
         if (existingRole.rows.length > 0) {
             return res.status(409).json({ 
@@ -343,9 +349,9 @@ router.post('/add-admin-secundario', authenticateToken, async (req, res) => {
         await pool.query(`
             INSERT INTO user_roles (user_id, role_id) 
             VALUES ($1, $2)
-        `, [userId, roleId]);
+        `, [user.id, roleId]);
         
-        console.log(`User ${userId} (${user.nickname}) assigned as admin secundario`);
+        console.log(`User ${user.id} (${user.nickname}) assigned as admin secundario`);
         
         res.json({
             success: true,
