@@ -292,25 +292,33 @@ router.delete('/delete-user/:userId', authenticateToken, async (req, res) => {
 router.post('/add-admin-secundario', authenticateToken, async (req, res) => {
     try {
         const { userId, nickname } = req.body;
-        console.log(`Request to add admin secundario: ${userId || nickname}`);
+        console.log(`🔧 REQUEST: add-admin-secundario - userId: ${userId}, nickname: ${nickname}`);
+        console.log(`🔧 REQUEST body full:`, req.body);
         
         if (!userId && !nickname) {
+            console.log(`❌ VALIDATION: Neither userId nor nickname provided`);
             return res.status(400).json({ error: 'userId o nickname es requerido' });
         }
         
         // Verificar que el usuario existe (por ID o nickname)
         let userCheck;
         if (userId) {
+            console.log(`🔍 SEARCHING: by userId = ${userId}`);
             userCheck = await pool.query('SELECT id, nickname, email FROM users WHERE id = $1', [userId]);
         } else {
+            console.log(`🔍 SEARCHING: by nickname = ${nickname}`);
             userCheck = await pool.query('SELECT id, nickname, email FROM users WHERE nickname = $1', [nickname]);
         }
         
+        console.log(`🔍 USER SEARCH result: found ${userCheck.rows.length} users`);
+        
         if (userCheck.rows.length === 0) {
+            console.log(`❌ USER NOT FOUND: ${userId || nickname}`);
             return res.status(404).json({ error: 'Usuario no encontrado' });
         }
         
         const user = userCheck.rows[0];
+        console.log(`✅ USER FOUND: ${user.nickname} (ID: ${user.id})`);
         
         // Verificar si ya es admin secundario (opcional - podemos permitir múltiples roles)
         const existingRole = await pool.query(`
@@ -354,7 +362,7 @@ router.post('/add-admin-secundario', authenticateToken, async (req, res) => {
             VALUES ($1, $2)
         `, [user.id, roleId]);
         
-        console.log(`User ${user.id} (${user.nickname}) assigned as admin secundario`);
+        console.log(`✅ SUCCESS: User ${user.id} (${user.nickname}) assigned as admin secundario`);
         
         res.json({
             success: true,
