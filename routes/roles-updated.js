@@ -95,6 +95,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                 `, [user.id]);
                 
                 user.total_users_blocks = parseInt(userBlockStats.rows[0].total_users) || 0;
+                console.log(`User ${user.nickname}: questions=${user.total_questions}, users=${user.total_users_blocks}`);
             } catch (e) {
                 user.total_users_blocks = 0;
             }
@@ -178,6 +179,8 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
             }));
 
         console.log(`Panel data: ${adminSecundarios.length} admins, ${profesoresCreadores.length} creadores, ${usuarios.length} usuarios`);
+        console.log('Admin users found:', adminUsers.rows.map(u => `${u.nickname} (${u.role_name})`));
+        console.log('AdminPrincipal in allUsers:', allUsers.rows.find(u => u.nickname === 'AdminPrincipal') ? 'YES' : 'NO');
 
         res.json({
             adminSecundarios: adminSecundarios,
