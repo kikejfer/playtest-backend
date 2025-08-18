@@ -155,28 +155,58 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
         // IDs de usuarios con roles administrativos
         const adminIds = new Set(adminSecundarios.map(admin => admin.id));
         
+        // Obtener asignaciones de administradores
+        let adminAssignments = {};
+        try {
+            const assignments = await pool.query(`
+                SELECT aa.assigned_user_id, aa.admin_id, u.nickname as admin_nickname
+                FROM admin_assignments aa
+                JOIN users u ON aa.admin_id = u.id
+            `);
+            
+            assignments.rows.forEach(assignment => {
+                adminAssignments[assignment.assigned_user_id] = {
+                    admin_id: assignment.admin_id,
+                    admin_nickname: assignment.admin_nickname
+                };
+            });
+        } catch (e) {
+            console.log('Admin assignments table does not exist yet, using defaults');
+        }
+
         // Usuarios con bloques como creadores (excluyendo administradores)
         const profesoresCreadores = usersWithBlocks.rows
             .filter(user => !adminIds.has(user.id))
-            .map(user => ({
-                id: user.id, nickname: user.nickname, email: user.email,
-                first_name: '', last_name: '', assigned_admin_id: 0, assigned_admin_nickname: 'Sin asignar',
-                blocks_created: parseInt(user.block_count) || 0, 
-                total_questions: parseInt(user.total_questions) || 0, 
-                total_users_blocks: parseInt(user.total_users_blocks) || 0,
-                luminarias_actuales: 0, luminarias_ganadas: 0, luminarias_gastadas: 0, luminarias_abonadas: 0, luminarias_compradas: 0,
-                role_name: 'creador_contenido'
-            }));
+            .map(user => {
+                const assignment = adminAssignments[user.id] || { admin_id: 0, admin_nickname: 'Sin asignar' };
+                return {
+                    id: user.id, nickname: user.nickname, email: user.email,
+                    first_name: '', last_name: '', 
+                    assigned_admin_id: assignment.admin_id, 
+                    assigned_admin_nickname: assignment.admin_nickname,
+                    blocks_created: parseInt(user.block_count) || 0, 
+                    total_questions: parseInt(user.total_questions) || 0, 
+                    total_users_blocks: parseInt(user.total_users_blocks) || 0,
+                    luminarias_actuales: 0, luminarias_ganadas: 0, luminarias_gastadas: 0, luminarias_abonadas: 0, luminarias_compradas: 0,
+                    role_name: 'creador_contenido'
+                };
+            });
 
         // Usuarios sin bloques (excluyendo administradores y creadores)
         const usuarios = allUsers.rows
             .filter(user => !adminIds.has(user.id) && !blockCreatorIds.has(user.id))
-            .map(user => ({
-                id: user.id, nickname: user.nickname, email: user.email,
-                first_name: '', last_name: '', assigned_admin_id: 0, assigned_admin_nickname: 'Sin asignar', blocks_loaded: 0,
-                luminarias_actuales: 0, luminarias_ganadas: 0, luminarias_gastadas: 0, luminarias_abonadas: 0, luminarias_compradas: 0,
-                role_name: 'usuario'
-            }));
+            .map(user => {
+                const assignment = adminAssignments[user.id] || { admin_id: 0, admin_nickname: 'Sin asignar' };
+                return {
+                    id: user.id, nickname: user.nickname, email: user.email,
+                    first_name: '', last_name: '', 
+                    assigned_admin_id: assignment.admin_id, 
+                    assigned_admin_nickname: assignment.admin_nickname, 
+                    blocks_loaded: 0,
+                    luminarias_actuales: 0, luminarias_ganadas: 0, luminarias_gastadas: 0, luminarias_abonadas: 0, luminarias_compradas: 0,
+                    role_name: 'usuario'
+                };
+            });
 
         console.log(`Panel data: ${adminSecundarios.length} admins, ${profesoresCreadores.length} creadores, ${usuarios.length} usuarios`);
         console.log('Admin users found:', adminUsers.rows.map(u => `${u.nickname} (${u.role_name})`));
@@ -435,9 +465,33 @@ router.post('/reassign-user', authenticateToken, async (req, res) => {
             return res.status(404).json({ error: 'Administrador no encontrado' });
         }
         
-        // Para simplificar, solo devolvemos éxito (sin implementar lógica de asignación real)
-        // En una implementación completa necesitaríamos tabla admin_assignments
-        console.log(`User ${userId} would be reassigned to admin ${newAdminId}`);
+        // Implementar lógica real de asignación
+        console.log(`🔧 BACKEND: Assigning user ${userId} to admin ${newAdminId}`);
+        
+        // Crear tabla admin_assignments si no existe
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS admin_assignments (
+                id SERIAL PRIMARY KEY,
+                admin_id INTEGER REFERENCES users(id),
+                assigned_user_id INTEGER REFERENCES users(id),
+                assigned_by INTEGER REFERENCES users(id),
+                assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(assigned_user_id)
+            )
+        `);
+        
+        // Insertar o actualizar la asignación
+        await pool.query(`
+            INSERT INTO admin_assignments (admin_id, assigned_user_id, assigned_by)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (assigned_user_id)
+            DO UPDATE SET 
+                admin_id = $1,
+                assigned_by = $3,
+                assigned_at = CURRENT_TIMESTAMP
+        `, [newAdminId, userId, req.user.id]);
+        
+        console.log(`✅ BACKEND: User ${userId} successfully assigned to admin ${newAdminId}`);
         
         res.json({
             success: true,
