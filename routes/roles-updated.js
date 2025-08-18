@@ -57,33 +57,57 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
         // Solo consultas básicas y seguras
         const allUsers = await pool.query('SELECT id, nickname, COALESCE(email, \'Sin email\') as email FROM users ORDER BY id');
         
+        // Consulta simple y segura para usuarios con bloques
         const usersWithBlocks = await pool.query(`
             SELECT DISTINCT 
                 u.id, 
                 u.nickname, 
                 COALESCE(u.email, 'Sin email') as email, 
-                COUNT(DISTINCT b.id) as block_count,
-                COALESCE(SUM(questions_count.total_questions), 0) as total_questions,
-                COALESCE(SUM(user_blocks_count.total_users), 0) as total_users_blocks
+                COUNT(DISTINCT b.id) as block_count
             FROM users u 
             INNER JOIN blocks b ON u.id = b.creator_id
-            LEFT JOIN (
-                SELECT 
-                    b.id as block_id,
-                    COUNT(q.id) as total_questions
-                FROM blocks b
-                LEFT JOIN questions q ON b.id = q.block_id
-                GROUP BY b.id
-            ) questions_count ON b.id = questions_count.block_id
-            LEFT JOIN (
-                SELECT 
-                    ub.block_id,
-                    COUNT(DISTINCT ub.user_id) as total_users
-                FROM user_blocks ub
-                GROUP BY ub.block_id
-            ) user_blocks_count ON b.id = user_blocks_count.block_id
             GROUP BY u.id, u.nickname, u.email
         `);
+        
+        // Intentar obtener estadísticas adicionales de forma segura
+        const blockStatsPromises = usersWithBlocks.rows.map(async (user) => {
+            try {
+                // Contar preguntas si la tabla existe
+                const questionStats = await pool.query(`
+                    SELECT COUNT(q.id) as total_questions
+                    FROM blocks b
+                    LEFT JOIN questions q ON b.id = q.block_id
+                    WHERE b.creator_id = $1
+                `, [user.id]);
+                
+                user.total_questions = parseInt(questionStats.rows[0].total_questions) || 0;
+            } catch (e) {
+                user.total_questions = 0;
+            }
+            
+            try {
+                // Contar usuarios de bloques si la tabla existe
+                const userBlockStats = await pool.query(`
+                    SELECT COUNT(DISTINCT ub.user_id) as total_users
+                    FROM blocks b
+                    LEFT JOIN user_blocks ub ON b.id = ub.block_id
+                    WHERE b.creator_id = $1
+                `, [user.id]);
+                
+                user.total_users_blocks = parseInt(userBlockStats.rows[0].total_users) || 0;
+            } catch (e) {
+                user.total_users_blocks = 0;
+            }
+            
+            return user;
+        });
+        
+        // Esperar a que se resuelvan todas las consultas
+        try {
+            await Promise.all(blockStatsPromises);
+        } catch (e) {
+            console.warn('Some block statistics queries failed, using defaults:', e.message);
+        }
         
         const blockCreatorIds = new Set(usersWithBlocks.rows.map(u => u.id));
         
@@ -370,6 +394,71 @@ router.post('/reassign-user', authenticateToken, async (req, res) => {
         console.error('Error reassigning user:', error);
         res.status(500).json({ 
             error: 'Error reasignando usuario',
+            details: error.message 
+        });
+    }
+});
+
+// Obtener bloques de un profesor/creador
+router.get('/profesores/:profesorId/bloques', authenticateToken, async (req, res) => {
+    try {
+        const { profesorId } = req.params;
+        console.log(`Request to get blocks for profesor ${profesorId}`);
+        
+        // Verificar que el profesor existe
+        const profesorCheck = await pool.query('SELECT id, nickname FROM users WHERE id = $1', [profesorId]);
+        if (profesorCheck.rows.length === 0) {
+            return res.status(404).json({ error: 'Profesor no encontrado' });
+        }
+        
+        // Obtener bloques del profesor
+        const bloques = await pool.query(`
+            SELECT 
+                b.id, 
+                b.name, 
+                b.created_at,
+                (SELECT COUNT(*) FROM questions q WHERE q.block_id = b.id) as total_preguntas
+            FROM blocks b 
+            WHERE b.creator_id = $1
+            ORDER BY b.created_at DESC
+        `, [profesorId]);
+        
+        // Para cada bloque, intentar obtener estadísticas adicionales
+        const bloquesConStats = await Promise.all(bloques.rows.map(async (bloque) => {
+            try {
+                // Contar usuarios del bloque
+                const usuariosBloque = await pool.query(`
+                    SELECT COUNT(DISTINCT ub.user_id) as usuarios_bloque
+                    FROM user_blocks ub 
+                    WHERE ub.block_id = $1
+                `, [bloque.id]);
+                
+                return {
+                    ...bloque,
+                    num_temas: 1, // Placeholder, podría calcularse si hay tabla de temas
+                    total_preguntas: parseInt(bloque.total_preguntas) || 0,
+                    usuarios_bloque: parseInt(usuariosBloque.rows[0].usuarios_bloque) || 0
+                };
+            } catch (e) {
+                return {
+                    ...bloque,
+                    num_temas: 1,
+                    total_preguntas: parseInt(bloque.total_preguntas) || 0,
+                    usuarios_bloque: 0
+                };
+            }
+        }));
+        
+        res.json({
+            success: true,
+            bloques: bloquesConStats,
+            profesor: profesorCheck.rows[0]
+        });
+        
+    } catch (error) {
+        console.error('Error getting profesor blocks:', error);
+        res.status(500).json({ 
+            error: 'Error obteniendo bloques del profesor',
             details: error.message 
         });
     }
