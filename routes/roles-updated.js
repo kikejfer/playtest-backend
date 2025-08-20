@@ -52,6 +52,7 @@ router.get('/debug-users', authenticateToken, async (req, res) => {
 // Panel principal ULTRA SIMPLE que funciona
 router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
     try {
+        console.log('🔥🔥🔥 DIAGNOSTIC VERSION 2025-08-20 - CHECKING ROLES 🔥🔥🔥');
         console.log('ULTRA SIMPLE admin panel request from user:', req.user.id);
         
         // Solo consultas básicas y seguras
@@ -223,11 +224,12 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
         }
 
         // Verificar qué roles existen en la base de datos
+        console.log('🏷️ CHECKING ROLES TABLE...');
         try {
             const allRoles = await pool.query('SELECT id, name FROM roles ORDER BY name');
             console.log('🏷️ Available roles in database:', allRoles.rows.map(r => `${r.id}:${r.name}`).join(', '));
         } catch (e) {
-            console.warn('Could not fetch roles table:', e.message);
+            console.warn('❌ Could not fetch roles table:', e.message);
         }
 
         // Obtener roles reales de todos los usuarios con bloques
