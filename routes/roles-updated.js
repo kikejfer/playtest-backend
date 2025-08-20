@@ -229,8 +229,12 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
         // Verificar qué roles existen en la base de datos
         console.log('🏷️ CHECKING ROLES TABLE...');
         try {
-            const allRoles = await pool.query('SELECT id, name FROM roles ORDER BY name');
+            const allRoles = await pool.query('SELECT id, name FROM roles ORDER BY id');
             console.log('🏷️ Available roles in database:', allRoles.rows.map(r => `${r.id}:${r.name}`).join(', '));
+            
+            // Verificar específicamente rol ID 5
+            const rol5 = allRoles.rows.find(r => r.id === 5);
+            console.log('🎯 Role ID 5 name:', rol5 ? rol5.name : 'NOT FOUND');
         } catch (e) {
             console.warn('❌ Could not fetch roles table:', e.message);
         }
@@ -241,7 +245,8 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
             FROM users u
             INNER JOIN user_roles ur ON u.id = ur.user_id
             INNER JOIN roles r ON ur.role_id = r.id
-            WHERE r.name IN ('profesor', 'creador', 'creador_contenido', 'administrador_principal', 'administrador_secundario', 'jugador')
+            WHERE r.name IN ('profesor', 'creador', 'creador_contenido', 'administrador_principal', 'administrador_secundario', 'jugador') 
+            OR r.id = 5
             ORDER BY u.id
         `);
         
@@ -338,7 +343,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                     creadores.push({ ...baseUserData, role_name: 'creador' });
                 }
                 
-                if (userRoles.includes('jugador')) {
+                if (userRoles.includes('jugador') || userRoles.some(role => role.includes('jugador'))) {
                     jugadores.push({ ...baseUserData, role_name: 'jugador' });
                 }
                 
