@@ -9,7 +9,7 @@ const router = express.Router();
 // Register
 router.post('/register', async (req, res) => {
   try {
-    const { nickname, password, email } = req.body;
+    const { nickname, password, email, nombre, apellido } = req.body;
 
     if (!nickname || !password) {
       return res.status(400).json({ error: 'Nickname and password are required' });
@@ -42,8 +42,8 @@ router.post('/register', async (req, res) => {
 
     // Create user
     const result = await pool.query(
-      'INSERT INTO users (nickname, password_hash, email) VALUES ($1, $2, $3) RETURNING id, nickname, created_at',
-      [nickname, passwordHash, email]
+      'INSERT INTO users (nickname, password_hash, email, nombre, apellido) VALUES ($1, $2, $3, $4, $5) RETURNING id, nickname, email, nombre, apellido, created_at',
+      [nickname, passwordHash, email, nombre, apellido]
     );
 
     const user = result.rows[0];
