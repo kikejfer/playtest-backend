@@ -235,22 +235,30 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
         // Obtener roles reales de todos los usuarios con bloques
         const userRolesPromises = usersWithBlocks.rows.map(async (user) => {
             try {
-                const roleResult = await pool.query(`
+                // Obtener TODOS los roles del usuario para determinar el más relevante
+                const allRolesResult = await pool.query(`
                     SELECT r.name as role_name
                     FROM user_roles ur
                     JOIN roles r ON ur.role_id = r.id
                     WHERE ur.user_id = $1
-                    ORDER BY CASE 
-                        WHEN r.name = 'administrador_principal' THEN 1
-                        WHEN r.name = 'administrador_secundario' THEN 2
-                        WHEN r.name = 'profesor' THEN 3
-                        WHEN r.name = 'creador' OR r.name = 'creador_contenido' THEN 4
-                        ELSE 5
-                    END
-                    LIMIT 1
+                    ORDER BY r.name
                 `, [user.id]);
                 
-                user.actual_role_name = roleResult.rows[0]?.role_name || 'usuario';
+                const userRoles = allRolesResult.rows.map(row => row.role_name);
+                console.log(`👤 User ${user.nickname} (ID: ${user.id}) has roles:`, userRoles);
+                
+                // Determinar el rol más relevante según jerarquía
+                if (userRoles.includes('administrador_principal')) {
+                    user.actual_role_name = 'administrador_principal';
+                } else if (userRoles.includes('administrador_secundario')) {
+                    user.actual_role_name = 'administrador_secundario';
+                } else if (userRoles.includes('creador') || userRoles.includes('creador_contenido')) {
+                    user.actual_role_name = 'creador';
+                } else if (userRoles.includes('profesor')) {
+                    user.actual_role_name = 'profesor';
+                } else {
+                    user.actual_role_name = 'usuario';
+                }
                 return user;
             } catch (e) {
                 console.warn(`Could not get role for user ${user.id}:`, e.message);
