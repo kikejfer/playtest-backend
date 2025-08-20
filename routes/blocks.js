@@ -285,6 +285,9 @@ router.get('/created', authenticateToken, async (req, res) => {
   try {
     console.log('🔍 /blocks/created endpoint called');
     console.log('🔍 User ID:', req.user.id);
+    console.log('🔍 User object:', req.user);
+    console.log('🔍 Headers:', req.headers);
+    console.log('🔍 Database URL:', process.env.DATABASE_URL?.substring(0, 50) + '...');
     
     // Simple query first to test database connection
     const testQuery = await pool.query('SELECT COUNT(*) as total FROM blocks WHERE creator_id = $1', [req.user.id]);
