@@ -222,6 +222,14 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
             console.log('Admin assignments table does not exist yet, using defaults');
         }
 
+        // Verificar qué roles existen en la base de datos
+        try {
+            const allRoles = await pool.query('SELECT id, name FROM roles ORDER BY name');
+            console.log('🏷️ Available roles in database:', allRoles.rows.map(r => `${r.id}:${r.name}`).join(', '));
+        } catch (e) {
+            console.warn('Could not fetch roles table:', e.message);
+        }
+
         // Obtener roles reales de todos los usuarios con bloques
         const userRolesPromises = usersWithBlocks.rows.map(async (user) => {
             try {
@@ -295,9 +303,16 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
             });
 
         // Contar roles específicos en profesoresCreadores
+        console.log('🔍 Analyzing roles in profesoresCreadores:');
+        profesoresCreadores.forEach(user => {
+            console.log(`  - ${user.nickname}: role_name="${user.role_name}"`);
+        });
+        
         const profesores = profesoresCreadores.filter(u => u.role_name === 'profesor').length;
         const creadores = profesoresCreadores.filter(u => u.role_name === 'creador_contenido').length;
         const otrosRoles = profesoresCreadores.filter(u => !['profesor', 'creador_contenido'].includes(u.role_name)).length;
+        
+        console.log(`📊 Role counts: profesores=${profesores}, creadores=${creadores}, otros=${otrosRoles}`);
         
         console.log(`📊 Panel data summary:`);
         console.log(`  - ${adminSecundarios.length} administradores`);
