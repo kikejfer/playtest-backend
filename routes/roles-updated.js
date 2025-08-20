@@ -282,6 +282,45 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                 } else {
                     user.actual_role_name = 'usuario';
                 }
+                
+                // Calcular estadísticas de preguntas y usuarios para este usuario
+                if (user.block_count > 0) {
+                    try {
+                        // Contar preguntas y temas desde topic_answers
+                        const questionStats = await pool.query(`
+                            SELECT 
+                                COALESCE(COUNT(DISTINCT ta.id), 0) as total_questions,
+                                COALESCE(COUNT(DISTINCT ta.topic_name), 0) as total_topics
+                            FROM blocks b
+                            LEFT JOIN topic_answers ta ON b.id = ta.block_id
+                            WHERE b.creator_id = $1
+                        `, [user.id]);
+                        
+                        user.total_questions = parseInt(questionStats.rows[0].total_questions) || 0;
+                        user.total_topics = parseInt(questionStats.rows[0].total_topics) || 0;
+                        
+                        // Contar usuarios que han cargado bloques de este usuario
+                        const userBlockStats = await pool.query(`
+                            SELECT COUNT(DISTINCT up.user_id) as total_users
+                            FROM blocks b
+                            LEFT JOIN user_profiles up ON up.loaded_blocks::jsonb ? b.id::text
+                            WHERE b.creator_id = $1
+                        `, [user.id]);
+                        
+                        user.total_users_blocks = parseInt(userBlockStats.rows[0].total_users) || 0;
+                        
+                    } catch (e) {
+                        console.warn(`Error calculating stats for user ${user.id}:`, e.message);
+                        user.total_questions = 0;
+                        user.total_topics = 0;
+                        user.total_users_blocks = 0;
+                    }
+                } else {
+                    user.total_questions = 0;
+                    user.total_topics = 0;
+                    user.total_users_blocks = 0;
+                }
+                
                 return user;
             } catch (e) {
                 console.warn(`Could not get role for user ${user.id}:`, e.message);
