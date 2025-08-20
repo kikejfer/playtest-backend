@@ -72,17 +72,21 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
         // Intentar obtener estadísticas adicionales de forma segura
         const blockStatsPromises = usersWithBlocks.rows.map(async (user) => {
             try {
-                // Contar preguntas usando la tabla optimizada block_answers
+                // Contar preguntas y temas usando las tablas optimizadas
                 const questionStats = await pool.query(`
-                    SELECT COALESCE(SUM(ba.total_questions), 0) as total_questions
+                    SELECT 
+                        COALESCE(SUM(ba.total_questions), 0) as total_questions,
+                        COALESCE(SUM(ba.total_topics), 0) as total_topics
                     FROM blocks b
                     LEFT JOIN block_answers ba ON b.id = ba.block_id
                     WHERE b.creator_id = $1
                 `, [user.id]);
                 
                 user.total_questions = parseInt(questionStats.rows[0].total_questions) || 0;
+                user.total_topics = parseInt(questionStats.rows[0].total_topics) || 0;
             } catch (e) {
                 user.total_questions = 0;
+                user.total_topics = 0;
             }
             
             try {
@@ -565,12 +569,16 @@ router.get('/profesores/:profesorId/bloques', authenticateToken, async (req, res
             return res.status(404).json({ error: 'Profesor no encontrado' });
         }
         
-        // Obtener bloques del profesor usando tabla optimizada
+        // Obtener bloques del profesor con información completa usando tablas optimizadas
         const bloques = await pool.query(`
             SELECT 
                 b.id, 
-                b.name, 
+                b.name,
+                b.description,
+                b.observaciones,
+                b.is_public,
                 b.created_at,
+                b.image_url,
                 COALESCE(ba.total_questions, 0) as total_preguntas,
                 COALESCE(ba.total_topics, 0) as num_temas
             FROM blocks b 
