@@ -58,20 +58,23 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
         // Solo consultas básicas y seguras
         const allUsers = await pool.query('SELECT id, nickname, COALESCE(email, \'Sin email\') as email FROM users ORDER BY id');
         
-        // Consulta simple y segura para usuarios con bloques
-        const usersWithBlocks = await pool.query(`
+        // Obtener TODOS los usuarios con sus estadísticas de bloques (incluso si no tienen)
+        const allUsersWithStats = await pool.query(`
             SELECT DISTINCT 
                 u.id, 
                 u.nickname, 
                 COALESCE(u.email, 'Sin email') as email, 
-                COUNT(DISTINCT b.id) as block_count
+                COALESCE(COUNT(DISTINCT b.id), 0) as block_count
             FROM users u 
-            INNER JOIN blocks b ON u.id = b.creator_id
+            LEFT JOIN blocks b ON u.id = b.creator_id
             GROUP BY u.id, u.nickname, u.email
+            ORDER BY u.id
         `);
         
-        // Intentar obtener estadísticas adicionales de forma segura
-        const blockStatsPromises = usersWithBlocks.rows.map(async (user) => {
+        // Intentar obtener estadísticas adicionales de forma segura para usuarios con bloques
+        const blockStatsPromises = allUsersWithStats.rows
+            .filter(user => user.block_count > 0)
+            .map(async (user) => {
             try {
                 // Contar preguntas y temas desde topic_answers para cada bloque del usuario
                 const questionStats = await pool.query(`
@@ -115,7 +118,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
             console.warn('Some block statistics queries failed, using defaults:', e.message);
         }
         
-        const blockCreatorIds = new Set(usersWithBlocks.rows.map(u => u.id));
+        const blockCreatorIds = new Set(allUsersWithStats.rows.filter(u => u.block_count > 0).map(u => u.id));
         
         // Obtener usuarios con roles administrativos
         const adminUsers = await pool.query(`
@@ -232,8 +235,23 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
             console.warn('❌ Could not fetch roles table:', e.message);
         }
 
-        // Obtener roles reales de todos los usuarios con bloques
-        const userRolesPromises = usersWithBlocks.rows.map(async (user) => {
+        // Obtener TODOS los usuarios que tienen roles de profesor/creador
+        const usersWithRolesQuery = await pool.query(`
+            SELECT DISTINCT u.id, u.nickname, COALESCE(u.email, 'Sin email') as email
+            FROM users u
+            INNER JOIN user_roles ur ON u.id = ur.user_id
+            INNER JOIN roles r ON ur.role_id = r.id
+            WHERE r.name IN ('profesor', 'creador', 'creador_contenido', 'administrador_principal', 'administrador_secundario')
+            ORDER BY u.id
+        `);
+        
+        console.log(`🔍 Found ${usersWithRolesQuery.rows.length} users with relevant roles`);
+        
+        // Procesar usuarios con roles y obtener sus estadísticas
+        const userRolesPromises = usersWithRolesQuery.rows.map(async (user) => {
+            // Buscar estadísticas de bloques para este usuario
+            const userStats = allUsersWithStats.rows.find(stat => stat.id === user.id);
+            user.block_count = userStats ? userStats.block_count : 0;
             try {
                 // Obtener TODOS los roles del usuario para determinar el más relevante
                 const allRolesResult = await pool.query(`
@@ -282,7 +300,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
         const profesores = [];
         const creadores = [];
         
-        // Procesar cada usuario con bloques según TODOS sus roles
+        // Procesar TODOS los usuarios con roles según TODOS sus roles
         for (const user of usersWithRoles) {
             if (adminIds.has(user.id)) continue; // Excluir administradores
             
