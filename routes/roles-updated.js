@@ -617,7 +617,7 @@ router.get('/profesores/:profesorId/bloques', authenticateToken, async (req, res
             return res.status(404).json({ error: 'Profesor no encontrado' });
         }
         
-        // Obtener bloques del profesor con información completa usando tablas optimizadas
+        // Obtener bloques del profesor con información completa usando topic_answers
         const bloques = await pool.query(`
             SELECT 
                 b.id, 
@@ -627,11 +627,12 @@ router.get('/profesores/:profesorId/bloques', authenticateToken, async (req, res
                 b.is_public,
                 b.created_at,
                 b.image_url,
-                COALESCE(ba.total_questions, 0) as total_preguntas,
-                COALESCE(ba.total_topics, 0) as num_temas
+                COALESCE(COUNT(DISTINCT ta.id), 0) as total_preguntas,
+                COALESCE(COUNT(DISTINCT ta.topic_name), 0) as num_temas
             FROM blocks b 
-            LEFT JOIN block_answers ba ON b.id = ba.block_id
+            LEFT JOIN topic_answers ta ON b.id = ta.block_id
             WHERE b.creator_id = $1
+            GROUP BY b.id, b.name, b.description, b.observaciones, b.is_public, b.created_at, b.image_url
             ORDER BY b.created_at DESC
         `, [profesorId]);
         
@@ -697,7 +698,7 @@ router.get('/creadores/:creadorId/bloques', authenticateToken, async (req, res) 
             return res.status(404).json({ error: 'Creador no encontrado' });
         }
         
-        // Obtener bloques del creador con información completa usando tablas optimizadas
+        // Obtener bloques del creador con información completa usando topic_answers
         const bloques = await pool.query(`
             SELECT 
                 b.id, 
@@ -709,12 +710,13 @@ router.get('/creadores/:creadorId/bloques', authenticateToken, async (req, res) 
                 b.image_url,
                 b.user_role_id,
                 r.name as created_with_role,
-                COALESCE(ba.total_questions, 0) as total_preguntas,
-                COALESCE(ba.total_topics, 0) as num_temas
+                COALESCE(COUNT(DISTINCT ta.id), 0) as total_preguntas,
+                COALESCE(COUNT(DISTINCT ta.topic_name), 0) as num_temas
             FROM blocks b 
             LEFT JOIN roles r ON b.user_role_id = r.id
-            LEFT JOIN block_answers ba ON b.id = ba.block_id
+            LEFT JOIN topic_answers ta ON b.id = ta.block_id
             WHERE b.creator_id = $1
+            GROUP BY b.id, b.name, b.description, b.observaciones, b.is_public, b.created_at, b.image_url, b.user_role_id, r.name
             ORDER BY b.created_at DESC
         `, [creadorId]);
         
