@@ -16,12 +16,11 @@ router.get('/', authenticateToken, async (req, res) => {
     const blocksResult = await pool.query(`
       SELECT b.id, b.name, b.description, b.observaciones, b.creator_id, b.is_public, b.created_at, b.image_url,
         u.nickname as creator_nickname,
-        COUNT(q.id) as question_count
+        COALESCE(ba.total_questions, 0) as question_count
       FROM blocks b
       LEFT JOIN users u ON b.creator_id = u.id
-      LEFT JOIN questions q ON b.id = q.block_id
+      LEFT JOIN block_answers ba ON b.id = ba.block_id
       WHERE b.is_public = true OR b.creator_id = $1
-      GROUP BY b.id, b.name, b.description, b.observaciones, b.creator_id, b.is_public, b.created_at, b.image_url, u.nickname
       ORDER BY b.created_at DESC
     `, [req.user.id]);
     
@@ -101,14 +100,13 @@ router.get('/available', authenticateToken, async (req, res) => {
     console.log('🔍 Total public blocks:', testQuery.rows[0]?.total || 0);
     
     const blocksResult = await pool.query(`
-      SELECT b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at, b.image_url,
+      SELECT b.id, b.name, b.description, b.observaciones, b.creator_id, b.is_public, b.created_at, b.image_url,
         u.nickname as creator_nickname,
-        COUNT(q.id) as question_count
+        COALESCE(ba.total_questions, 0) as question_count
       FROM blocks b
       LEFT JOIN users u ON b.creator_id = u.id
-      LEFT JOIN questions q ON b.id = q.block_id
+      LEFT JOIN block_answers ba ON b.id = ba.block_id
       WHERE b.is_public = true
-      GROUP BY b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at, b.image_url, u.nickname
       ORDER BY b.created_at DESC
     `);
 
@@ -202,14 +200,13 @@ router.get('/loaded', authenticateToken, async (req, res) => {
     // Get the actual blocks that are loaded
     const placeholders = loadedBlockIds.map((_, index) => `$${index + 2}`).join(',');
     const blocksResult = await pool.query(`
-      SELECT b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at, b.image_url,
+      SELECT b.id, b.name, b.description, b.observaciones, b.creator_id, b.is_public, b.created_at, b.image_url,
         u.nickname as creator_nickname,
-        COUNT(q.id) as question_count
+        COALESCE(ba.total_questions, 0) as question_count
       FROM blocks b
       LEFT JOIN users u ON b.creator_id = u.id
-      LEFT JOIN questions q ON b.id = q.block_id
+      LEFT JOIN block_answers ba ON b.id = ba.block_id
       WHERE b.id = ANY($1)
-      GROUP BY b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at, b.image_url, u.nickname
       ORDER BY b.created_at DESC
     `, [loadedBlockIds]);
 
@@ -295,14 +292,13 @@ router.get('/created', authenticateToken, async (req, res) => {
     console.log('🔍 Total created blocks for user:', testQuery.rows[0]?.total || 0);
     
     const blocksResult = await pool.query(`
-      SELECT b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at, b.image_url,
+      SELECT b.id, b.name, b.description, b.observaciones, b.creator_id, b.is_public, b.created_at, b.image_url,
         u.nickname as creator_nickname,
-        COUNT(q.id) as question_count
+        COALESCE(ba.total_questions, 0) as question_count
       FROM blocks b
       LEFT JOIN users u ON b.creator_id = u.id
-      LEFT JOIN questions q ON b.id = q.block_id
+      LEFT JOIN block_answers ba ON b.id = ba.block_id
       WHERE b.creator_id = $1
-      GROUP BY b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at, b.image_url, u.nickname
       ORDER BY b.created_at DESC
     `, [req.user.id]);
 
