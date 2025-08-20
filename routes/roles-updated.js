@@ -278,23 +278,54 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
             console.log(`  - ${user.nickname}: ${user.actual_role_name} (${user.block_count} blocks)`);
         });
 
-        // Usuarios con bloques como profesores/creadores (excluyendo administradores)
-        const profesoresCreadores = usersWithRoles
-            .filter(user => !adminIds.has(user.id))
-            .map(user => {
-                const assignment = adminAssignments[user.id] || { admin_id: 0, admin_nickname: 'Sin asignar' };
-                return {
-                    id: user.id, nickname: user.nickname, email: user.email,
-                    first_name: '', last_name: '', 
-                    assigned_admin_id: assignment.admin_id, 
-                    assigned_admin_nickname: assignment.admin_nickname,
-                    blocks_created: parseInt(user.block_count) || 0, 
-                    total_questions: parseInt(user.total_questions) || 0, 
-                    total_users_blocks: parseInt(user.total_users_blocks) || 0,
-                    luminarias_actuales: 0, luminarias_ganadas: 0, luminarias_gastadas: 0, luminarias_abonadas: 0, luminarias_compradas: 0,
-                    role_name: user.actual_role_name
-                };
-            });
+        // Crear listas separadas por rol (usuarios pueden aparecer en múltiples listas)
+        const profesores = [];
+        const creadores = [];
+        
+        // Procesar cada usuario con bloques según TODOS sus roles
+        for (const user of usersWithRoles) {
+            if (adminIds.has(user.id)) continue; // Excluir administradores
+            
+            const assignment = adminAssignments[user.id] || { admin_id: 0, admin_nickname: 'Sin asignar' };
+            const baseUserData = {
+                id: user.id, nickname: user.nickname, email: user.email,
+                first_name: '', last_name: '', 
+                assigned_admin_id: assignment.admin_id, 
+                assigned_admin_nickname: assignment.admin_nickname,
+                blocks_created: parseInt(user.block_count) || 0, 
+                total_questions: parseInt(user.total_questions) || 0, 
+                total_users_blocks: parseInt(user.total_users_blocks) || 0,
+                luminarias_actuales: 0, luminarias_ganadas: 0, luminarias_gastadas: 0, luminarias_abonadas: 0, luminarias_compradas: 0
+            };
+            
+            // Obtener todos los roles del usuario
+            try {
+                const userRolesResult = await pool.query(`
+                    SELECT r.name as role_name
+                    FROM user_roles ur
+                    JOIN roles r ON ur.role_id = r.id
+                    WHERE ur.user_id = $1
+                `, [user.id]);
+                
+                const userRoles = userRolesResult.rows.map(row => row.role_name);
+                console.log(`👤 User ${user.nickname} (ID: ${user.id}) has roles:`, userRoles);
+                
+                // Agregar a las listas correspondientes según roles
+                if (userRoles.includes('profesor')) {
+                    profesores.push({ ...baseUserData, role_name: 'profesor' });
+                }
+                
+                if (userRoles.includes('creador') || userRoles.includes('creador_contenido')) {
+                    creadores.push({ ...baseUserData, role_name: 'creador' });
+                }
+                
+            } catch (e) {
+                console.warn(`Error getting roles for user ${user.id}:`, e.message);
+            }
+        }
+        
+        // Combinar para compatibilidad con código existente
+        const profesoresCreadores = [...profesores, ...creadores];
 
         // Usuarios sin bloques (excluyendo administradores y creadores)
         const usuarios = allUsers.rows
@@ -312,23 +343,23 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                 };
             });
 
-        // Contar roles específicos en profesoresCreadores
-        console.log('🔍 Analyzing roles in profesoresCreadores:');
-        profesoresCreadores.forEach(user => {
-            console.log(`  - ${user.nickname}: role_name="${user.role_name}"`);
+        // Logs de las listas separadas
+        console.log('🔍 PROFESORES LIST:');
+        profesores.forEach(user => {
+            console.log(`  - ${user.nickname} (ID: ${user.id})`);
         });
         
-        const profesores = profesoresCreadores.filter(u => u.role_name === 'profesor').length;
-        const creadores = profesoresCreadores.filter(u => u.role_name === 'creador' || u.role_name === 'creador_contenido').length;
-        const otrosRoles = profesoresCreadores.filter(u => !['profesor', 'creador', 'creador_contenido'].includes(u.role_name)).length;
+        console.log('🔍 CREADORES LIST:');
+        creadores.forEach(user => {
+            console.log(`  - ${user.nickname} (ID: ${user.id})`);
+        });
         
-        console.log(`📊 Role counts: profesores=${profesores}, creadores=${creadores}, otros=${otrosRoles}`);
+        console.log(`📊 Role counts: profesores=${profesores.length}, creadores=${creadores.length}`);
         
         console.log(`📊 Panel data summary:`);
         console.log(`  - ${adminSecundarios.length} administradores`);
-        console.log(`  - ${profesores} profesores (con bloques)`);
-        console.log(`  - ${creadores} creadores de contenido (con bloques)`);
-        console.log(`  - ${otrosRoles} otros roles (con bloques)`);
+        console.log(`  - ${profesores.length} profesores (con bloques)`);
+        console.log(`  - ${creadores.length} creadores (con bloques)`);
         console.log(`  - ${usuarios.length} usuarios (sin bloques)`);
         console.log('🔧 Admin users found:', adminUsers.rows.map(u => `${u.nickname} (${u.role_name})`));
         console.log('👑 AdminPrincipal in allUsers:', allUsers.rows.find(u => u.nickname === 'AdminPrincipal') ? 'YES' : 'NO');
