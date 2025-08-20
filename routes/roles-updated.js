@@ -72,11 +72,11 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
         // Intentar obtener estadísticas adicionales de forma segura
         const blockStatsPromises = usersWithBlocks.rows.map(async (user) => {
             try {
-                // Contar preguntas si la tabla existe
+                // Contar preguntas usando la tabla optimizada block_answers
                 const questionStats = await pool.query(`
-                    SELECT COUNT(q.id) as total_questions
+                    SELECT COALESCE(SUM(ba.total_questions), 0) as total_questions
                     FROM blocks b
-                    LEFT JOIN questions q ON b.id = q.block_id
+                    LEFT JOIN block_answers ba ON b.id = ba.block_id
                     WHERE b.creator_id = $1
                 `, [user.id]);
                 
@@ -565,19 +565,21 @@ router.get('/profesores/:profesorId/bloques', authenticateToken, async (req, res
             return res.status(404).json({ error: 'Profesor no encontrado' });
         }
         
-        // Obtener bloques del profesor
+        // Obtener bloques del profesor usando tabla optimizada
         const bloques = await pool.query(`
             SELECT 
                 b.id, 
                 b.name, 
                 b.created_at,
-                (SELECT COUNT(*) FROM questions q WHERE q.block_id = b.id) as total_preguntas
+                COALESCE(ba.total_questions, 0) as total_preguntas,
+                COALESCE(ba.total_topics, 0) as num_temas
             FROM blocks b 
+            LEFT JOIN block_answers ba ON b.id = ba.block_id
             WHERE b.creator_id = $1
             ORDER BY b.created_at DESC
         `, [profesorId]);
         
-        // Para cada bloque, intentar obtener estadísticas adicionales
+        // Agregar estadísticas de usuarios para cada bloque
         const bloquesConStats = await Promise.all(bloques.rows.map(async (bloque) => {
             try {
                 // Contar usuarios que han cargado este bloque usando user_profiles.loaded_blocks
@@ -589,14 +591,14 @@ router.get('/profesores/:profesorId/bloques', authenticateToken, async (req, res
                 
                 return {
                     ...bloque,
-                    num_temas: 1, // Placeholder, podría calcularse si hay tabla de temas
+                    num_temas: parseInt(bloque.num_temas) || 0,
                     total_preguntas: parseInt(bloque.total_preguntas) || 0,
                     usuarios_bloque: parseInt(usuariosBloque.rows[0].usuarios_bloque) || 0
                 };
             } catch (e) {
                 return {
                     ...bloque,
-                    num_temas: 1,
+                    num_temas: parseInt(bloque.num_temas) || 0,
                     total_preguntas: parseInt(bloque.total_preguntas) || 0,
                     usuarios_bloque: 0
                 };
@@ -624,17 +626,20 @@ router.get('/bloques/:blockId/temas', authenticateToken, async (req, res) => {
         const { blockId } = req.params;
         console.log(`Request to get topics for block ${blockId}`);
         
-        // Para simplificar, devolver datos de ejemplo ya que la estructura de temas puede variar
-        // En una implementación real, esto consultaría la tabla de temas
+        // Obtener temas usando la tabla optimizada topic_answers
+        const temasResult = await pool.query(`
+            SELECT 
+                ta.topic,
+                ta.question_count as num_preguntas
+            FROM topic_answers ta
+            WHERE ta.block_id = $1
+            ORDER BY ta.topic
+        `, [blockId]);
+        
         res.json({
             success: true,
-            temas: [
-                {
-                    topic: 'Tema General',
-                    num_preguntas: 5
-                }
-            ],
-            block_id: blockId
+            temas: temasResult.rows,
+            block_id: parseInt(blockId)
         });
         
     } catch (error) {
