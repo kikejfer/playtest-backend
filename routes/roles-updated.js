@@ -222,8 +222,46 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
             console.log('Admin assignments table does not exist yet, using defaults');
         }
 
-        // Usuarios con bloques como creadores (excluyendo administradores)
-        const profesoresCreadores = usersWithBlocks.rows
+        // Obtener roles reales de todos los usuarios con bloques
+        const userRolesPromises = usersWithBlocks.rows.map(async (user) => {
+            try {
+                const roleResult = await pool.query(`
+                    SELECT r.name as role_name
+                    FROM user_roles ur
+                    JOIN roles r ON ur.role_id = r.id
+                    WHERE ur.user_id = $1
+                    ORDER BY CASE 
+                        WHEN r.name = 'administrador_principal' THEN 1
+                        WHEN r.name = 'administrador_secundario' THEN 2
+                        WHEN r.name = 'profesor' THEN 3
+                        WHEN r.name = 'creador_contenido' THEN 4
+                        ELSE 5
+                    END
+                    LIMIT 1
+                `, [user.id]);
+                
+                user.actual_role_name = roleResult.rows[0]?.role_name || 'usuario';
+                return user;
+            } catch (e) {
+                console.warn(`Could not get role for user ${user.id}:`, e.message);
+                user.actual_role_name = 'usuario';
+                return user;
+            }
+        });
+        
+        const usersWithRoles = await Promise.all(userRolesPromises);
+        
+        // IDs de usuarios que han creado bloques (para excluir de usuarios normales)
+        const blockCreatorIds = new Set(usersWithRoles.map(user => user.id));
+        
+        // Log de roles encontrados
+        console.log('👥 Users with blocks and their roles:');
+        usersWithRoles.forEach(user => {
+            console.log(`  - ${user.nickname}: ${user.actual_role_name} (${user.block_count} blocks)`);
+        });
+
+        // Usuarios con bloques como profesores/creadores (excluyendo administradores)
+        const profesoresCreadores = usersWithRoles
             .filter(user => !adminIds.has(user.id))
             .map(user => {
                 const assignment = adminAssignments[user.id] || { admin_id: 0, admin_nickname: 'Sin asignar' };
@@ -236,7 +274,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                     total_questions: parseInt(user.total_questions) || 0, 
                     total_users_blocks: parseInt(user.total_users_blocks) || 0,
                     luminarias_actuales: 0, luminarias_ganadas: 0, luminarias_gastadas: 0, luminarias_abonadas: 0, luminarias_compradas: 0,
-                    role_name: 'creador_contenido'
+                    role_name: user.actual_role_name
                 };
             });
 
@@ -256,9 +294,19 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                 };
             });
 
-        console.log(`Panel data: ${adminSecundarios.length} admins, ${profesoresCreadores.length} creadores, ${usuarios.length} usuarios`);
-        console.log('Admin users found:', adminUsers.rows.map(u => `${u.nickname} (${u.role_name})`));
-        console.log('AdminPrincipal in allUsers:', allUsers.rows.find(u => u.nickname === 'AdminPrincipal') ? 'YES' : 'NO');
+        // Contar roles específicos en profesoresCreadores
+        const profesores = profesoresCreadores.filter(u => u.role_name === 'profesor').length;
+        const creadores = profesoresCreadores.filter(u => u.role_name === 'creador_contenido').length;
+        const otrosRoles = profesoresCreadores.filter(u => !['profesor', 'creador_contenido'].includes(u.role_name)).length;
+        
+        console.log(`📊 Panel data summary:`);
+        console.log(`  - ${adminSecundarios.length} administradores`);
+        console.log(`  - ${profesores} profesores (con bloques)`);
+        console.log(`  - ${creadores} creadores de contenido (con bloques)`);
+        console.log(`  - ${otrosRoles} otros roles (con bloques)`);
+        console.log(`  - ${usuarios.length} usuarios (sin bloques)`);
+        console.log('🔧 Admin users found:', adminUsers.rows.map(u => `${u.nickname} (${u.role_name})`));
+        console.log('👑 AdminPrincipal in allUsers:', allUsers.rows.find(u => u.nickname === 'AdminPrincipal') ? 'YES' : 'NO');
 
         res.json({
             adminSecundarios: adminSecundarios,
