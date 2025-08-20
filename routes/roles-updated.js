@@ -280,7 +280,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
 
         // Usuarios sin bloques (excluyendo administradores y creadores)
         const usuarios = allUsers.rows
-            .filter(user => !adminIds.has(user.id) && !blockCreatorIds.has(user.id))
+            .filter(user => !adminIds.has(user.id) && !rolesCreatorIds.has(user.id))
             .map(user => {
                 const assignment = adminAssignments[user.id] || { admin_id: 0, admin_nickname: 'Sin asignar' };
                 return {
