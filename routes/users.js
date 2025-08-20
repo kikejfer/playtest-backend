@@ -8,7 +8,7 @@ const router = express.Router();
 router.get('/profile', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT u.id, u.nickname, u.email, u.created_at,
+      SELECT u.id, u.nickname, u.email, u.nombre, u.apellido, u.created_at,
         up.answer_history, up.stats, up.preferences, up.loaded_blocks
       FROM users u
       LEFT JOIN user_profiles up ON u.id = up.user_id
@@ -24,6 +24,8 @@ router.get('/profile', authenticateToken, async (req, res) => {
       id: user.id,
       nickname: user.nickname,
       email: user.email,
+      nombre: user.nombre,
+      apellido: user.apellido,
       createdAt: user.created_at,
       answerHistory: user.answer_history || [],
       stats: user.stats || {},
@@ -40,13 +42,33 @@ router.get('/profile', authenticateToken, async (req, res) => {
 // Update user profile
 router.put('/profile', authenticateToken, async (req, res) => {
   try {
-    const { email, preferences } = req.body;
+    const { email, nombre, apellido, preferences } = req.body;
 
     // Update user basic info
+    const updateFields = [];
+    const updateValues = [];
+    let paramIndex = 1;
+
     if (email !== undefined) {
+      updateFields.push(`email = $${paramIndex++}`);
+      updateValues.push(email);
+    }
+    if (nombre !== undefined) {
+      updateFields.push(`nombre = $${paramIndex++}`);
+      updateValues.push(nombre);
+    }
+    if (apellido !== undefined) {
+      updateFields.push(`apellido = $${paramIndex++}`);
+      updateValues.push(apellido);
+    }
+
+    if (updateFields.length > 0) {
+      updateFields.push('updated_at = CURRENT_TIMESTAMP');
+      updateValues.push(req.user.id);
+      
       await pool.query(
-        'UPDATE users SET email = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
-        [email, req.user.id]
+        `UPDATE users SET ${updateFields.join(', ')} WHERE id = $${paramIndex}`,
+        updateValues
       );
     }
 

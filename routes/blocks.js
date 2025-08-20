@@ -14,14 +14,14 @@ router.get('/', authenticateToken, async (req, res) => {
     console.log('🔍 /blocks endpoint called for user:', req.user.id);
     
     const blocksResult = await pool.query(`
-      SELECT b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at, b.image_url,
+      SELECT b.id, b.name, b.description, b.observaciones, b.creator_id, b.is_public, b.created_at, b.image_url,
         u.nickname as creator_nickname,
         COUNT(q.id) as question_count
       FROM blocks b
       LEFT JOIN users u ON b.creator_id = u.id
       LEFT JOIN questions q ON b.id = q.block_id
       WHERE b.is_public = true OR b.creator_id = $1
-      GROUP BY b.id, b.name, b.description, b.creator_id, b.is_public, b.created_at, b.image_url, u.nickname
+      GROUP BY b.id, b.name, b.description, b.observaciones, b.creator_id, b.is_public, b.created_at, b.image_url, u.nickname
       ORDER BY b.created_at DESC
     `, [req.user.id]);
     
@@ -66,6 +66,7 @@ router.get('/', authenticateToken, async (req, res) => {
         nombreCorto: block.name, // For frontend compatibility
         nombreLargo: block.description || block.name,
         description: block.description,
+        observaciones: block.observaciones,
         creatorId: block.creator_id,
         creatorNickname: block.creator_nickname,
         isPublic: block.is_public,
@@ -462,13 +463,13 @@ router.delete('/:id/load', authenticateToken, async (req, res) => {
 // Create new block
 router.post('/', authenticateToken, async (req, res) => {
   try {
-    const { name, description, isPublic = true } = req.body;
+    const { name, description, observaciones, isPublic = true } = req.body;
 
     if (!name) {
       return res.status(400).json({ error: 'Block name is required' });
     }
 
-    console.log('🔧 Creating block:', { name, description, isPublic, userId: req.user.id });
+    console.log('🔧 Creating block:', { name, description, observaciones, isPublic, userId: req.user.id });
 
     // Search for related image
     console.log('📸 Searching for block image...');
@@ -481,10 +482,10 @@ router.post('/', authenticateToken, async (req, res) => {
       imageUrl = imageSearch.getRandomFallbackImage();
     }
 
-    // Create the block with image
+    // Create the block with image and observations
     const result = await pool.query(
-      'INSERT INTO blocks (name, description, creator_id, is_public, image_url) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-      [name, description, req.user.id, isPublic, imageUrl]
+      'INSERT INTO blocks (name, description, observaciones, creator_id, is_public, image_url) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+      [name, description, observaciones, req.user.id, isPublic, imageUrl]
     );
 
     const newBlock = result.rows[0];
@@ -553,7 +554,7 @@ router.post('/', authenticateToken, async (req, res) => {
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
     const blockId = req.params.id;
-    const { name, description, isPublic } = req.body;
+    const { name, description, observaciones, isPublic } = req.body;
 
     // Check if user owns the block
     const ownerCheck = await pool.query(
@@ -570,8 +571,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
     }
 
     const result = await pool.query(
-      'UPDATE blocks SET name = $1, description = $2, is_public = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $4 RETURNING *',
-      [name, description, isPublic, blockId]
+      'UPDATE blocks SET name = $1, description = $2, observaciones = $3, is_public = $4, updated_at = CURRENT_TIMESTAMP WHERE id = $5 RETURNING *',
+      [name, description, observaciones, isPublic, blockId]
     );
 
     res.json({
