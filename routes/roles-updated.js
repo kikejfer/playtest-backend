@@ -235,13 +235,13 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
             console.warn('❌ Could not fetch roles table:', e.message);
         }
 
-        // Obtener TODOS los usuarios que tienen roles de profesor/creador
+        // Obtener TODOS los usuarios que tienen roles relevantes
         const usersWithRolesQuery = await pool.query(`
             SELECT DISTINCT u.id, u.nickname, COALESCE(u.email, 'Sin email') as email
             FROM users u
             INNER JOIN user_roles ur ON u.id = ur.user_id
             INNER JOIN roles r ON ur.role_id = r.id
-            WHERE r.name IN ('profesor', 'creador', 'creador_contenido', 'administrador_principal', 'administrador_secundario')
+            WHERE r.name IN ('profesor', 'creador', 'creador_contenido', 'administrador_principal', 'administrador_secundario', 'jugador')
             ORDER BY u.id
         `);
         
@@ -299,6 +299,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
         // Crear listas separadas por rol (usuarios pueden aparecer en múltiples listas)
         const profesores = [];
         const creadores = [];
+        const jugadores = [];
         
         // Procesar TODOS los usuarios con roles según TODOS sus roles
         for (const user of usersWithRoles) {
@@ -337,6 +338,10 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                     creadores.push({ ...baseUserData, role_name: 'creador' });
                 }
                 
+                if (userRoles.includes('jugador')) {
+                    jugadores.push({ ...baseUserData, role_name: 'jugador' });
+                }
+                
             } catch (e) {
                 console.warn(`Error getting roles for user ${user.id}:`, e.message);
             }
@@ -372,19 +377,28 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
             console.log(`  - ${user.nickname} (ID: ${user.id})`);
         });
         
-        console.log(`📊 Role counts: profesores=${profesores.length}, creadores=${creadores.length}`);
+        console.log('🔍 JUGADORES LIST:');
+        jugadores.forEach(user => {
+            console.log(`  - ${user.nickname} (ID: ${user.id})`);
+        });
+        
+        console.log(`📊 Role counts: profesores=${profesores.length}, creadores=${creadores.length}, jugadores=${jugadores.length}`);
         
         console.log(`📊 Panel data summary:`);
         console.log(`  - ${adminSecundarios.length} administradores`);
-        console.log(`  - ${profesores.length} profesores (con bloques)`);
-        console.log(`  - ${creadores.length} creadores (con bloques)`);
-        console.log(`  - ${usuarios.length} usuarios (sin bloques)`);
+        console.log(`  - ${profesores.length} profesores`);
+        console.log(`  - ${creadores.length} creadores`);
+        console.log(`  - ${jugadores.length} jugadores`);
+        console.log(`  - ${usuarios.length} usuarios sin roles específicos`);
         console.log('🔧 Admin users found:', adminUsers.rows.map(u => `${u.nickname} (${u.role_name})`));
         console.log('👑 AdminPrincipal in allUsers:', allUsers.rows.find(u => u.nickname === 'AdminPrincipal') ? 'YES' : 'NO');
 
         res.json({
             adminSecundarios: adminSecundarios,
             profesoresCreadores: profesoresCreadores,
+            profesores: profesores,
+            creadores: creadores,
+            jugadores: jugadores,
             usuarios: usuarios,
             availableAdmins: allUsers.rows,
             ultra_simple_version: true
