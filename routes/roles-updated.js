@@ -242,7 +242,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                         WHEN r.name = 'administrador_principal' THEN 1
                         WHEN r.name = 'administrador_secundario' THEN 2
                         WHEN r.name = 'profesor' THEN 3
-                        WHEN r.name = 'creador_contenido' THEN 4
+                        WHEN r.name = 'creador' OR r.name = 'creador_contenido' THEN 4
                         ELSE 5
                     END
                     LIMIT 1
@@ -309,8 +309,8 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
         });
         
         const profesores = profesoresCreadores.filter(u => u.role_name === 'profesor').length;
-        const creadores = profesoresCreadores.filter(u => u.role_name === 'creador_contenido').length;
-        const otrosRoles = profesoresCreadores.filter(u => !['profesor', 'creador_contenido'].includes(u.role_name)).length;
+        const creadores = profesoresCreadores.filter(u => u.role_name === 'creador' || u.role_name === 'creador_contenido').length;
+        const otrosRoles = profesoresCreadores.filter(u => !['profesor', 'creador', 'creador_contenido'].includes(u.role_name)).length;
         
         console.log(`📊 Role counts: profesores=${profesores}, creadores=${creadores}, otros=${otrosRoles}`);
         
