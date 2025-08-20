@@ -72,13 +72,13 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
         // Intentar obtener estadísticas adicionales de forma segura
         const blockStatsPromises = usersWithBlocks.rows.map(async (user) => {
             try {
-                // Contar preguntas y temas usando las tablas optimizadas
+                // Contar preguntas y temas desde topic_answers para cada bloque del usuario
                 const questionStats = await pool.query(`
                     SELECT 
-                        COALESCE(SUM(ba.total_questions), 0) as total_questions,
-                        COALESCE(SUM(ba.total_topics), 0) as total_topics
+                        COALESCE(COUNT(DISTINCT ta.id), 0) as total_questions,
+                        COALESCE(COUNT(DISTINCT ta.topic_name), 0) as total_topics
                     FROM blocks b
-                    LEFT JOIN block_answers ba ON b.id = ba.block_id
+                    LEFT JOIN topic_answers ta ON b.id = ta.block_id
                     WHERE b.creator_id = $1
                 `, [user.id]);
                 
@@ -252,7 +252,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
         const usersWithRoles = await Promise.all(userRolesPromises);
         
         // IDs de usuarios que han creado bloques (para excluir de usuarios normales)
-        const blockCreatorIds = new Set(usersWithRoles.map(user => user.id));
+        const rolesCreatorIds = new Set(usersWithRoles.map(user => user.id));
         
         // Log de roles encontrados
         console.log('👥 Users with blocks and their roles:');
