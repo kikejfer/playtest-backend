@@ -14,11 +14,13 @@ router.get('/', authenticateToken, async (req, res) => {
     console.log('🔍 /blocks endpoint called for user:', req.user.id);
     
     const blocksResult = await pool.query(`
-      SELECT b.id, b.name, b.description, b.observaciones, b.creator_id, b.is_public, b.created_at, b.image_url,
+      SELECT b.id, b.name, b.description, b.observaciones, b.creator_id, b.is_public, b.created_at, b.image_url, b.user_role_id,
         u.nickname as creator_nickname,
+        r.name as created_with_role,
         COALESCE(ba.total_questions, 0) as question_count
       FROM blocks b
       LEFT JOIN users u ON b.creator_id = u.id
+      LEFT JOIN roles r ON b.user_role_id = r.id
       LEFT JOIN block_answers ba ON b.id = ba.block_id
       WHERE b.is_public = true OR b.creator_id = $1
       ORDER BY b.created_at DESC
@@ -100,11 +102,13 @@ router.get('/available', authenticateToken, async (req, res) => {
     console.log('🔍 Total public blocks:', testQuery.rows[0]?.total || 0);
     
     const blocksResult = await pool.query(`
-      SELECT b.id, b.name, b.description, b.observaciones, b.creator_id, b.is_public, b.created_at, b.image_url,
+      SELECT b.id, b.name, b.description, b.observaciones, b.creator_id, b.is_public, b.created_at, b.image_url, b.user_role_id,
         u.nickname as creator_nickname,
+        r.name as created_with_role,
         COALESCE(ba.total_questions, 0) as question_count
       FROM blocks b
       LEFT JOIN users u ON b.creator_id = u.id
+      LEFT JOIN roles r ON b.user_role_id = r.id
       LEFT JOIN block_answers ba ON b.id = ba.block_id
       WHERE b.is_public = true
       ORDER BY b.created_at DESC
@@ -200,11 +204,13 @@ router.get('/loaded', authenticateToken, async (req, res) => {
     // Get the actual blocks that are loaded
     const placeholders = loadedBlockIds.map((_, index) => `$${index + 2}`).join(',');
     const blocksResult = await pool.query(`
-      SELECT b.id, b.name, b.description, b.observaciones, b.creator_id, b.is_public, b.created_at, b.image_url,
+      SELECT b.id, b.name, b.description, b.observaciones, b.creator_id, b.is_public, b.created_at, b.image_url, b.user_role_id,
         u.nickname as creator_nickname,
+        r.name as created_with_role,
         COALESCE(ba.total_questions, 0) as question_count
       FROM blocks b
       LEFT JOIN users u ON b.creator_id = u.id
+      LEFT JOIN roles r ON b.user_role_id = r.id
       LEFT JOIN block_answers ba ON b.id = ba.block_id
       WHERE b.id = ANY($1)
       ORDER BY b.created_at DESC
@@ -292,11 +298,13 @@ router.get('/created', authenticateToken, async (req, res) => {
     console.log('🔍 Total created blocks for user:', testQuery.rows[0]?.total || 0);
     
     const blocksResult = await pool.query(`
-      SELECT b.id, b.name, b.description, b.observaciones, b.creator_id, b.is_public, b.created_at, b.image_url,
+      SELECT b.id, b.name, b.description, b.observaciones, b.creator_id, b.is_public, b.created_at, b.image_url, b.user_role_id,
         u.nickname as creator_nickname,
+        r.name as created_with_role,
         COALESCE(ba.total_questions, 0) as question_count
       FROM blocks b
       LEFT JOIN users u ON b.creator_id = u.id
+      LEFT JOIN roles r ON b.user_role_id = r.id
       LEFT JOIN block_answers ba ON b.id = ba.block_id
       WHERE b.creator_id = $1
       ORDER BY b.created_at DESC
@@ -467,6 +475,32 @@ router.post('/', authenticateToken, async (req, res) => {
 
     console.log('🔧 Creating block:', { name, description, observaciones, isPublic, userId: req.user.id });
 
+    // Get user's current role for block creation
+    let userRoleId = null;
+    try {
+      const roleResult = await pool.query(`
+        SELECT ur.role_id 
+        FROM user_roles ur 
+        JOIN roles r ON ur.role_id = r.id 
+        WHERE ur.user_id = $1 
+        ORDER BY CASE 
+          WHEN r.name = 'administrador_principal' THEN 1
+          WHEN r.name = 'administrador_secundario' THEN 2
+          WHEN r.name = 'creador' OR r.name = 'creador_contenido' THEN 3
+          WHEN r.name = 'profesor' THEN 4
+          ELSE 5 
+        END
+        LIMIT 1
+      `, [req.user.id]);
+      
+      if (roleResult.rows.length > 0) {
+        userRoleId = roleResult.rows[0].role_id;
+        console.log('👤 User role for block creation:', userRoleId);
+      }
+    } catch (roleError) {
+      console.warn('⚠️ Could not determine user role, block will be created without role association:', roleError.message);
+    }
+
     // Search for related image
     console.log('📸 Searching for block image...');
     let imageUrl = null;
@@ -478,10 +512,10 @@ router.post('/', authenticateToken, async (req, res) => {
       imageUrl = imageSearch.getRandomFallbackImage();
     }
 
-    // Create the block with image and observations
+    // Create the block with image, observations, and user role
     const result = await pool.query(
-      'INSERT INTO blocks (name, description, observaciones, creator_id, is_public, image_url) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-      [name, description, observaciones, req.user.id, isPublic, imageUrl]
+      'INSERT INTO blocks (name, description, observaciones, creator_id, is_public, image_url, user_role_id) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+      [name, description, observaciones, req.user.id, isPublic, imageUrl, userRoleId]
     );
 
     const newBlock = result.rows[0];
@@ -785,14 +819,39 @@ router.post('/create-expanded', authenticateToken, async (req, res) => {
       imageUrl = imageSearch.getRandomFallbackImage();
     }
 
+    // Get user's current role for block creation
+    let userRoleId = null;
+    try {
+      const roleResult = await client.query(`
+        SELECT ur.role_id 
+        FROM user_roles ur 
+        JOIN roles r ON ur.role_id = r.id 
+        WHERE ur.user_id = $1 
+        ORDER BY CASE 
+          WHEN r.name = 'administrador_principal' THEN 1
+          WHEN r.name = 'administrador_secundario' THEN 2
+          WHEN r.name = 'creador' OR r.name = 'creador_contenido' THEN 3
+          WHEN r.name = 'profesor' THEN 4
+          ELSE 5 
+        END
+        LIMIT 1
+      `, [req.user.id]);
+      
+      if (roleResult.rows.length > 0) {
+        userRoleId = roleResult.rows[0].role_id;
+      }
+    } catch (roleError) {
+      console.warn('⚠️ Could not determine user role for expanded block creation:', roleError.message);
+    }
+
     // Create the block
     const blockResult = await client.query(`
       INSERT INTO blocks (
         name, description, detailed_description, block_type, education_level, 
         scope, knowledge_area_id, difficulty_level, content_language, 
-        author_observations, block_state, creator_id, is_public, image_url
+        author_observations, block_state, creator_id, is_public, image_url, user_role_id
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
       ) RETURNING *
     `, [
       name, 
@@ -808,7 +867,8 @@ router.post('/create-expanded', authenticateToken, async (req, res) => {
       block_state,
       req.user.id,
       block_state === 'public',
-      imageUrl
+      imageUrl,
+      userRoleId
     ]);
 
     const newBlock = blockResult.rows[0];

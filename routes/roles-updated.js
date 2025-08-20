@@ -561,7 +561,7 @@ router.post('/reassign-user', authenticateToken, async (req, res) => {
 router.get('/profesores/:profesorId/bloques', authenticateToken, async (req, res) => {
     try {
         const { profesorId } = req.params;
-        console.log(`Request to get blocks for profesor ${profesorId}`);
+        console.log(`👨‍🏫 PROFESOR ENDPOINT - Request to get blocks for profesor ${profesorId}`);
         
         // Verificar que el profesor existe
         const profesorCheck = await pool.query('SELECT id, nickname FROM users WHERE id = $1', [profesorId]);
@@ -597,18 +597,27 @@ router.get('/profesores/:profesorId/bloques', authenticateToken, async (req, res
                     WHERE up.loaded_blocks::jsonb ? $1::text
                 `, [bloque.id]);
                 
+                const usuariosCount = parseInt(usuariosBloque.rows[0].usuarios_bloque) || 0;
                 return {
                     ...bloque,
                     num_temas: parseInt(bloque.num_temas) || 0,
                     total_preguntas: parseInt(bloque.total_preguntas) || 0,
-                    usuarios_bloque: parseInt(usuariosBloque.rows[0].usuarios_bloque) || 0
+                    usuarios_bloque: usuariosCount,
+                    total_usuarios: usuariosCount,
+                    total_users: usuariosCount,
+                    usuarios: usuariosCount,
+                    users: usuariosCount
                 };
             } catch (e) {
                 return {
                     ...bloque,
                     num_temas: parseInt(bloque.num_temas) || 0,
                     total_preguntas: parseInt(bloque.total_preguntas) || 0,
-                    usuarios_bloque: 0
+                    usuarios_bloque: 0,
+                    total_usuarios: 0,
+                    total_users: 0,
+                    usuarios: 0,
+                    users: 0
                 };
             }
         }));
@@ -623,6 +632,187 @@ router.get('/profesores/:profesorId/bloques', authenticateToken, async (req, res
         console.error('Error getting profesor blocks:', error);
         res.status(500).json({ 
             error: 'Error obteniendo bloques del profesor',
+            details: error.message 
+        });
+    }
+});
+
+// Obtener bloques de un creador
+router.get('/creadores/:creadorId/bloques', authenticateToken, async (req, res) => {
+    try {
+        const { creadorId } = req.params;
+        console.log(`🎨 CREADOR ENDPOINT - Request to get blocks for creador ${creadorId}`);
+        
+        // Verificar que el creador existe
+        const creadorCheck = await pool.query('SELECT id, nickname FROM users WHERE id = $1', [creadorId]);
+        if (creadorCheck.rows.length === 0) {
+            return res.status(404).json({ error: 'Creador no encontrado' });
+        }
+        
+        // Obtener bloques del creador con información completa usando tablas optimizadas
+        const bloques = await pool.query(`
+            SELECT 
+                b.id, 
+                b.name,
+                b.description,
+                b.observaciones,
+                b.is_public,
+                b.created_at,
+                b.image_url,
+                b.user_role_id,
+                r.name as created_with_role,
+                COALESCE(ba.total_questions, 0) as total_preguntas,
+                COALESCE(ba.total_topics, 0) as num_temas
+            FROM blocks b 
+            LEFT JOIN roles r ON b.user_role_id = r.id
+            LEFT JOIN block_answers ba ON b.id = ba.block_id
+            WHERE b.creator_id = $1
+            ORDER BY b.created_at DESC
+        `, [creadorId]);
+        
+        console.log(`Found ${bloques.rows.length} blocks for creador ${creadorId}`);
+        
+        // Agregar estadísticas de usuarios para cada bloque
+        const bloquesConStats = await Promise.all(bloques.rows.map(async (bloque) => {
+            try {
+                // Contar usuarios que han cargado este bloque usando user_profiles.loaded_blocks
+                const usuariosBloque = await pool.query(`
+                    SELECT COUNT(DISTINCT up.user_id) as usuarios_bloque
+                    FROM user_profiles up 
+                    WHERE up.loaded_blocks::jsonb ? $1::text
+                `, [bloque.id]);
+                
+                const usuariosCount = parseInt(usuariosBloque.rows[0].usuarios_bloque) || 0;
+                return {
+                    ...bloque,
+                    num_temas: parseInt(bloque.num_temas) || 0,
+                    total_preguntas: parseInt(bloque.total_preguntas) || 0,
+                    usuarios_bloque: usuariosCount,
+                    total_usuarios: usuariosCount,
+                    total_users: usuariosCount,
+                    usuarios: usuariosCount,
+                    users: usuariosCount
+                };
+            } catch (e) {
+                return {
+                    ...bloque,
+                    num_temas: parseInt(bloque.num_temas) || 0,
+                    total_preguntas: parseInt(bloque.total_preguntas) || 0,
+                    usuarios_bloque: 0,
+                    total_usuarios: 0,
+                    total_users: 0,
+                    usuarios: 0,
+                    users: 0
+                };
+            }
+        }));
+        
+        res.json({
+            success: true,
+            creadorInfo: {
+                id: creadorCheck.rows[0].id,
+                nickname: creadorCheck.rows[0].nickname
+            },
+            bloques: bloquesConStats
+        });
+        
+    } catch (error) {
+        console.error('Error getting creador blocks:', error);
+        res.status(500).json({ 
+            error: 'Error obteniendo bloques del creador',
+            details: error.message 
+        });
+    }
+});
+
+// Endpoint alternativo para obtener bloques por parámetro de consulta
+router.get('/bloques', authenticateToken, async (req, res) => {
+    try {
+        const { creador_id } = req.query;
+        
+        if (!creador_id) {
+            return res.status(400).json({ error: 'creador_id parameter is required' });
+        }
+        
+        console.log(`Request to get blocks for creador via query param ${creador_id}`);
+        
+        // Verificar que el creador existe
+        const creadorCheck = await pool.query('SELECT id, nickname FROM users WHERE id = $1', [creador_id]);
+        if (creadorCheck.rows.length === 0) {
+            return res.status(404).json({ error: 'Creador no encontrado' });
+        }
+        
+        // Obtener bloques del creador
+        const bloques = await pool.query(`
+            SELECT 
+                b.id, 
+                b.name,
+                b.description,
+                b.observaciones,
+                b.is_public,
+                b.created_at,
+                b.image_url,
+                b.user_role_id,
+                r.name as created_with_role,
+                COALESCE(ba.total_questions, 0) as total_preguntas,
+                COALESCE(ba.total_topics, 0) as num_temas
+            FROM blocks b 
+            LEFT JOIN roles r ON b.user_role_id = r.id
+            LEFT JOIN block_answers ba ON b.id = ba.block_id
+            WHERE b.creator_id = $1
+            ORDER BY b.created_at DESC
+        `, [creador_id]);
+        
+        console.log(`Found ${bloques.rows.length} blocks for creador ${creador_id} via query param`);
+        
+        // Agregar estadísticas de usuarios para cada bloque
+        const bloquesConStats = await Promise.all(bloques.rows.map(async (bloque) => {
+            try {
+                // Contar usuarios que han cargado este bloque usando user_profiles.loaded_blocks
+                const usuariosBloque = await pool.query(`
+                    SELECT COUNT(DISTINCT up.user_id) as usuarios_bloque
+                    FROM user_profiles up 
+                    WHERE up.loaded_blocks::jsonb ? $1::text
+                `, [bloque.id]);
+                
+                const usuariosCount = parseInt(usuariosBloque.rows[0].usuarios_bloque) || 0;
+                return {
+                    ...bloque,
+                    num_temas: parseInt(bloque.num_temas) || 0,
+                    total_preguntas: parseInt(bloque.total_preguntas) || 0,
+                    usuarios_bloque: usuariosCount,
+                    total_usuarios: usuariosCount,
+                    total_users: usuariosCount,
+                    usuarios: usuariosCount,
+                    users: usuariosCount
+                };
+            } catch (e) {
+                return {
+                    ...bloque,
+                    num_temas: parseInt(bloque.num_temas) || 0,
+                    total_preguntas: parseInt(bloque.total_preguntas) || 0,
+                    usuarios_bloque: 0,
+                    total_usuarios: 0,
+                    total_users: 0,
+                    usuarios: 0,
+                    users: 0
+                };
+            }
+        }));
+        
+        res.json({
+            success: true,
+            creadorInfo: {
+                id: creadorCheck.rows[0].id,
+                nickname: creadorCheck.rows[0].nickname
+            },
+            bloques: bloquesConStats
+        });
+        
+    } catch (error) {
+        console.error('Error getting creador blocks via query param:', error);
+        res.status(500).json({ 
+            error: 'Error obteniendo bloques del creador',
             details: error.message 
         });
     }

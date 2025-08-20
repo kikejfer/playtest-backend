@@ -370,4 +370,165 @@ function calculateQuestionConsolidation(questionAnswers) {
   return consolidationScore;
 }
 
+// Get user roles
+router.get('/roles', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT r.name
+      FROM user_roles ur
+      JOIN roles r ON ur.role_id = r.id
+      WHERE ur.user_id = $1
+      ORDER BY r.name
+    `, [req.user.id]);
+
+    const roleNames = result.rows.map(row => row.name);
+    res.json(roleNames);
+
+  } catch (error) {
+    console.error('Error fetching user roles:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Update user roles
+router.put('/update-roles', authenticateToken, async (req, res) => {
+  try {
+    const { roles } = req.body;
+
+    if (!Array.isArray(roles)) {
+      return res.status(400).json({ error: 'Roles must be an array' });
+    }
+
+    console.log(`🎭 Updating roles for user ${req.user.id}:`, roles);
+
+    // Start transaction
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Check if user is trying to modify admin roles
+      const hasAdminRoles = roles.some(role => 
+        role.includes('administrador') || role.includes('admin')
+      );
+
+      if (hasAdminRoles) {
+        // Verify current user has admin permissions
+        const currentRoles = await client.query(`
+          SELECT r.name
+          FROM user_roles ur
+          JOIN roles r ON ur.role_id = r.id
+          WHERE ur.user_id = $1
+        `, [req.user.id]);
+
+        const currentRoleNames = currentRoles.rows.map(r => r.name);
+        const isAdmin = currentRoleNames.some(role => 
+          role.includes('administrador_principal') || role.includes('admin')
+        );
+
+        if (!isAdmin) {
+          await client.query('ROLLBACK');
+          return res.status(403).json({ 
+            error: 'Only administrators can assign admin roles' 
+          });
+        }
+      }
+
+      // Remove all current roles for this user
+      await client.query('DELETE FROM user_roles WHERE user_id = $1', [req.user.id]);
+
+      // Add new roles
+      if (roles.length > 0) {
+        // First, get all valid role IDs
+        const validRoles = await client.query(`
+          SELECT id, name FROM roles WHERE name = ANY($1)
+        `, [roles]);
+
+        if (validRoles.rows.length !== roles.length) {
+          const validRoleNames = validRoles.rows.map(r => r.name);
+          const invalidRoles = roles.filter(r => !validRoleNames.includes(r));
+          await client.query('ROLLBACK');
+          return res.status(400).json({ 
+            error: `Invalid roles: ${invalidRoles.join(', ')}` 
+          });
+        }
+
+        // Insert new role assignments
+        for (const roleRow of validRoles.rows) {
+          await client.query(`
+            INSERT INTO user_roles (user_id, role_id) 
+            VALUES ($1, $2)
+          `, [req.user.id, roleRow.id]);
+        }
+
+        console.log(`✅ User ${req.user.id} roles updated to:`, roles);
+      } else {
+        console.log(`✅ User ${req.user.id} roles cleared (no roles assigned)`);
+      }
+
+      await client.query('COMMIT');
+      res.json({ 
+        message: 'Roles updated successfully', 
+        roles: roles 
+      });
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+
+  } catch (error) {
+    console.error('Error updating user roles:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Change user password
+router.put('/change-password', authenticateToken, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: 'Current password and new password are required' });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: 'New password must be at least 6 characters long' });
+    }
+
+    // Get user's current password hash
+    const userResult = await pool.query(
+      'SELECT password FROM users WHERE id = $1',
+      [req.user.id]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const bcrypt = require('bcrypt');
+    const isCurrentPasswordValid = await bcrypt.compare(currentPassword, userResult.rows[0].password);
+
+    if (!isCurrentPasswordValid) {
+      return res.status(400).json({ error: 'Current password is incorrect' });
+    }
+
+    // Hash new password and update
+    const saltRounds = 12;
+    const hashedNewPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    await pool.query(
+      'UPDATE users SET password = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+      [hashedNewPassword, req.user.id]
+    );
+
+    res.json({ message: 'Password changed successfully' });
+
+  } catch (error) {
+    console.error('Error changing password:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 module.exports = router;
