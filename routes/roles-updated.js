@@ -86,11 +86,11 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
             }
             
             try {
-                // Contar usuarios de bloques si la tabla existe
+                // Contar usuarios que han cargado bloques de este creador usando user_profiles.loaded_blocks
                 const userBlockStats = await pool.query(`
-                    SELECT COUNT(DISTINCT ub.user_id) as total_users
+                    SELECT COUNT(DISTINCT up.user_id) as total_users
                     FROM blocks b
-                    LEFT JOIN user_blocks ub ON b.id = ub.block_id
+                    LEFT JOIN user_profiles up ON up.loaded_blocks::jsonb ? b.id::text
                     WHERE b.creator_id = $1
                 `, [user.id]);
                 
@@ -580,11 +580,11 @@ router.get('/profesores/:profesorId/bloques', authenticateToken, async (req, res
         // Para cada bloque, intentar obtener estadísticas adicionales
         const bloquesConStats = await Promise.all(bloques.rows.map(async (bloque) => {
             try {
-                // Contar usuarios del bloque
+                // Contar usuarios que han cargado este bloque usando user_profiles.loaded_blocks
                 const usuariosBloque = await pool.query(`
-                    SELECT COUNT(DISTINCT ub.user_id) as usuarios_bloque
-                    FROM user_blocks ub 
-                    WHERE ub.block_id = $1
+                    SELECT COUNT(DISTINCT up.user_id) as usuarios_bloque
+                    FROM user_profiles up 
+                    WHERE up.loaded_blocks::jsonb ? $1::text
                 `, [bloque.id]);
                 
                 return {
