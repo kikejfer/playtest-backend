@@ -27,7 +27,7 @@ router.get('/debug-users', authenticateToken, async (req, res) => {
         const usersWithBlocks = await pool.query(`
             SELECT DISTINCT u.id, u.nickname, u.email, COUNT(b.id) as block_count
             FROM users u
-            INNER JOIN blocks b ON u.id = b.creator_id
+            INNER JOIN blocks b ON u.id = b.user_id
             GROUP BY u.id, u.nickname, u.email
             ORDER BY u.id LIMIT 10
         `);
@@ -66,7 +66,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                 COALESCE(u.email, 'Sin email') as email, 
                 COALESCE(COUNT(DISTINCT b.id), 0) as block_count
             FROM users u 
-            LEFT JOIN blocks b ON u.id = b.creator_id
+            LEFT JOIN blocks b ON u.id = b.user_id
             GROUP BY u.id, u.nickname, u.email
             ORDER BY u.id
         `);
@@ -80,10 +80,10 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                 const questionStats = await pool.query(`
                     SELECT 
                         COALESCE(COUNT(DISTINCT ta.id), 0) as total_questions,
-                        COALESCE(COUNT(DISTINCT ta.topic_name), 0) as total_topics
+                        COALESCE(COUNT(DISTINCT ta.topic), 0) as total_topics
                     FROM blocks b
                     LEFT JOIN topic_answers ta ON b.id = ta.block_id
-                    WHERE b.creator_id = $1
+                    WHERE b.user_id = $1
                 `, [user.id]);
                 
                 user.total_questions = parseInt(questionStats.rows[0].total_questions) || 0;
@@ -94,12 +94,12 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
             }
             
             try {
-                // Contar usuarios que han cargado bloques de este creador usando user_profiles.loaded_blocks
+                // Contar usuarios que han cargado bloques de este creador usando user_loaded_blocks
                 const userBlockStats = await pool.query(`
-                    SELECT COUNT(DISTINCT up.user_id) as total_users
+                    SELECT COUNT(DISTINCT ulb.user_id) as total_users
                     FROM blocks b
-                    LEFT JOIN user_profiles up ON up.loaded_blocks::jsonb ? b.id::text
-                    WHERE b.creator_id = $1
+                    LEFT JOIN user_loaded_blocks ulb ON b.id = ulb.block_id
+                    WHERE b.user_id = $1
                 `, [user.id]);
                 
                 user.total_users_blocks = parseInt(userBlockStats.rows[0].total_users) || 0;
@@ -155,7 +155,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
             const blockCounts = await pool.query(`
                 SELECT aa.admin_id, COUNT(DISTINCT b.id) as block_count, COALESCE(SUM(q_count.question_count), 0) as question_count
                 FROM admin_assignments aa
-                JOIN blocks b ON aa.assigned_user_id = b.creator_id
+                JOIN blocks b ON aa.assigned_user_id = b.user_id
                 LEFT JOIN (
                     SELECT block_id, COUNT(*) as question_count 
                     FROM questions 
@@ -290,10 +290,10 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                         const questionStats = await pool.query(`
                             SELECT 
                                 COALESCE(COUNT(DISTINCT ta.id), 0) as total_questions,
-                                COALESCE(COUNT(DISTINCT ta.topic_name), 0) as total_topics
+                                COALESCE(COUNT(DISTINCT ta.topic), 0) as total_topics
                             FROM blocks b
                             LEFT JOIN topic_answers ta ON b.id = ta.block_id
-                            WHERE b.creator_id = $1
+                            WHERE b.user_id = $1
                         `, [user.id]);
                         
                         user.total_questions = parseInt(questionStats.rows[0].total_questions) || 0;
@@ -301,10 +301,10 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                         
                         // Contar usuarios que han cargado bloques de este usuario
                         const userBlockStats = await pool.query(`
-                            SELECT COUNT(DISTINCT up.user_id) as total_users
+                            SELECT COUNT(DISTINCT ulb.user_id) as total_users
                             FROM blocks b
-                            LEFT JOIN user_profiles up ON up.loaded_blocks::jsonb ? b.id::text
-                            WHERE b.creator_id = $1
+                            LEFT JOIN user_loaded_blocks ulb ON b.id = ulb.block_id
+                            WHERE b.user_id = $1
                         `, [user.id]);
                         
                         user.total_users_blocks = parseInt(userBlockStats.rows[0].total_users) || 0;
@@ -538,7 +538,7 @@ router.delete('/delete-user/:userId', authenticateToken, async (req, res) => {
         
         // 3. Borrar preguntas creadas por el usuario
         try {
-            const deletedQuestions = await pool.query('DELETE FROM questions WHERE creator_id = $1', [userId]);
+            const deletedQuestions = await pool.query('DELETE FROM questions WHERE user_id = $1', [userId]);
             if (deletedQuestions.rowCount > 0) {
                 deletedData.push(`${deletedQuestions.rowCount} preguntas creadas`);
             }
@@ -546,7 +546,7 @@ router.delete('/delete-user/:userId', authenticateToken, async (req, res) => {
         
         // 4. Borrar bloques creados por el usuario
         try {
-            const deletedBlocks = await pool.query('DELETE FROM blocks WHERE creator_id = $1', [userId]);
+            const deletedBlocks = await pool.query('DELETE FROM blocks WHERE user_id = $1', [userId]);
             if (deletedBlocks.rowCount > 0) {
                 deletedData.push(`${deletedBlocks.rowCount} bloques creados`);
             }
@@ -793,7 +793,7 @@ router.get('/profesores/:profesorId/bloques', authenticateToken, async (req, res
             return res.status(404).json({ error: 'Profesor no encontrado' });
         }
         
-        // Obtener bloques del profesor con información completa usando topic_answers
+        // Obtener bloques del profesor creados específicamente con rol de profesor
         const bloques = await pool.query(`
             SELECT 
                 b.id, 
@@ -804,10 +804,12 @@ router.get('/profesores/:profesorId/bloques', authenticateToken, async (req, res
                 b.created_at,
                 b.image_url,
                 COALESCE(COUNT(DISTINCT ta.id), 0) as total_preguntas,
-                COALESCE(COUNT(DISTINCT ta.topic_name), 0) as num_temas
+                COALESCE(COUNT(DISTINCT ta.topic), 0) as num_temas
             FROM blocks b 
+            JOIN user_roles ur ON b.user_role_id = ur.id
+            JOIN roles r ON ur.role_id = r.id
             LEFT JOIN topic_answers ta ON b.id = ta.block_id
-            WHERE b.creator_id = $1
+            WHERE b.user_id = $1 AND r.name = 'profesor'
             GROUP BY b.id, b.name, b.description, b.observaciones, b.is_public, b.created_at, b.image_url
             ORDER BY b.created_at DESC
         `, [profesorId]);
@@ -815,11 +817,11 @@ router.get('/profesores/:profesorId/bloques', authenticateToken, async (req, res
         // Agregar estadísticas de usuarios para cada bloque
         const bloquesConStats = await Promise.all(bloques.rows.map(async (bloque) => {
             try {
-                // Contar usuarios que han cargado este bloque usando user_profiles.loaded_blocks
+                // Contar usuarios que han cargado este bloque usando user_loaded_blocks
                 const usuariosBloque = await pool.query(`
-                    SELECT COUNT(DISTINCT up.user_id) as usuarios_bloque
-                    FROM user_profiles up 
-                    WHERE up.loaded_blocks::jsonb ? $1::text
+                    SELECT COUNT(DISTINCT ulb.user_id) as usuarios_bloque
+                    FROM user_loaded_blocks ulb 
+                    WHERE ulb.block_id = $1
                 `, [bloque.id]);
                 
                 const usuariosCount = parseInt(usuariosBloque.rows[0].usuarios_bloque) || 0;
@@ -874,7 +876,7 @@ router.get('/creadores/:creadorId/bloques', authenticateToken, async (req, res) 
             return res.status(404).json({ error: 'Creador no encontrado' });
         }
         
-        // Obtener bloques del creador con información completa usando topic_answers
+        // Obtener bloques del creador creados específicamente con rol de creador
         const bloques = await pool.query(`
             SELECT 
                 b.id, 
@@ -887,11 +889,12 @@ router.get('/creadores/:creadorId/bloques', authenticateToken, async (req, res) 
                 b.user_role_id,
                 r.name as created_with_role,
                 COALESCE(COUNT(DISTINCT ta.id), 0) as total_preguntas,
-                COALESCE(COUNT(DISTINCT ta.topic_name), 0) as num_temas
+                COALESCE(COUNT(DISTINCT ta.topic), 0) as num_temas
             FROM blocks b 
-            LEFT JOIN roles r ON b.user_role_id = r.id
+            JOIN user_roles ur ON b.user_role_id = ur.id
+            JOIN roles r ON ur.role_id = r.id
             LEFT JOIN topic_answers ta ON b.id = ta.block_id
-            WHERE b.creator_id = $1
+            WHERE b.user_id = $1 AND r.name = 'creador'
             GROUP BY b.id, b.name, b.description, b.observaciones, b.is_public, b.created_at, b.image_url, b.user_role_id, r.name
             ORDER BY b.created_at DESC
         `, [creadorId]);
@@ -901,11 +904,11 @@ router.get('/creadores/:creadorId/bloques', authenticateToken, async (req, res) 
         // Agregar estadísticas de usuarios para cada bloque
         const bloquesConStats = await Promise.all(bloques.rows.map(async (bloque) => {
             try {
-                // Contar usuarios que han cargado este bloque usando user_profiles.loaded_blocks
+                // Contar usuarios que han cargado este bloque usando user_loaded_blocks
                 const usuariosBloque = await pool.query(`
-                    SELECT COUNT(DISTINCT up.user_id) as usuarios_bloque
-                    FROM user_profiles up 
-                    WHERE up.loaded_blocks::jsonb ? $1::text
+                    SELECT COUNT(DISTINCT ulb.user_id) as usuarios_bloque
+                    FROM user_loaded_blocks ulb 
+                    WHERE ulb.block_id = $1
                 `, [bloque.id]);
                 
                 const usuariosCount = parseInt(usuariosBloque.rows[0].usuarios_bloque) || 0;
@@ -954,16 +957,16 @@ router.get('/creadores/:creadorId/bloques', authenticateToken, async (req, res) 
 // Endpoint alternativo para obtener bloques por parámetro de consulta
 router.get('/bloques', authenticateToken, async (req, res) => {
     try {
-        const { creador_id } = req.query;
+        const { user_id } = req.query;
         
-        if (!creador_id) {
-            return res.status(400).json({ error: 'creador_id parameter is required' });
+        if (!user_id) {
+            return res.status(400).json({ error: 'user_id parameter is required' });
         }
         
-        console.log(`Request to get blocks for creador via query param ${creador_id}`);
+        console.log(`Request to get blocks for user via query param ${user_id}`);
         
-        // Verificar que el creador existe
-        const creadorCheck = await pool.query('SELECT id, nickname FROM users WHERE id = $1', [creador_id]);
+        // Verificar que el usuario existe
+        const creadorCheck = await pool.query('SELECT id, nickname FROM users WHERE id = $1', [user_id]);
         if (creadorCheck.rows.length === 0) {
             return res.status(404).json({ error: 'Creador no encontrado' });
         }
@@ -985,20 +988,20 @@ router.get('/bloques', authenticateToken, async (req, res) => {
             FROM blocks b 
             LEFT JOIN roles r ON b.user_role_id = r.id
             LEFT JOIN block_answers ba ON b.id = ba.block_id
-            WHERE b.creator_id = $1
+            WHERE b.user_id = $1
             ORDER BY b.created_at DESC
-        `, [creador_id]);
+        `, [user_id]);
         
-        console.log(`Found ${bloques.rows.length} blocks for creador ${creador_id} via query param`);
+        console.log(`Found ${bloques.rows.length} blocks for user ${user_id} via query param`);
         
         // Agregar estadísticas de usuarios para cada bloque
         const bloquesConStats = await Promise.all(bloques.rows.map(async (bloque) => {
             try {
-                // Contar usuarios que han cargado este bloque usando user_profiles.loaded_blocks
+                // Contar usuarios que han cargado este bloque usando user_loaded_blocks
                 const usuariosBloque = await pool.query(`
-                    SELECT COUNT(DISTINCT up.user_id) as usuarios_bloque
-                    FROM user_profiles up 
-                    WHERE up.loaded_blocks::jsonb ? $1::text
+                    SELECT COUNT(DISTINCT ulb.user_id) as usuarios_bloque
+                    FROM user_loaded_blocks ulb 
+                    WHERE ulb.block_id = $1
                 `, [bloque.id]);
                 
                 const usuariosCount = parseInt(usuariosBloque.rows[0].usuarios_bloque) || 0;
@@ -1097,7 +1100,7 @@ router.get('/temas/:topicName/preguntas', authenticateToken, async (req, res) =>
                     ]
                 }
             ],
-            topic_name: decodeURIComponent(topicName)
+            topic: decodeURIComponent(topicName)
         });
         
     } catch (error) {
