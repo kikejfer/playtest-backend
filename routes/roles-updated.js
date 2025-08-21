@@ -245,7 +245,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
             FROM users u
             INNER JOIN user_roles ur ON u.id = ur.user_id
             INNER JOIN roles r ON ur.role_id = r.id
-            WHERE r.name IN ('profesor', 'creador', 'creador_contenido', 'administrador_principal', 'administrador_secundario', 'jugador') 
+            WHERE r.name IN ('profesor', 'creador', 'administrador_principal', 'administrador_secundario', 'jugador') 
             OR r.id = 5
             ORDER BY u.id
         `);
@@ -275,7 +275,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                     user.actual_role_name = 'administrador_principal';
                 } else if (userRoles.includes('administrador_secundario')) {
                     user.actual_role_name = 'administrador_secundario';
-                } else if (userRoles.includes('creador') || userRoles.includes('creador_contenido')) {
+                } else if (userRoles.includes('creador')) {
                     user.actual_role_name = 'creador';
                 } else if (userRoles.includes('profesor')) {
                     user.actual_role_name = 'profesor';
@@ -378,7 +378,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                     profesores.push({ ...baseUserData, role_name: 'profesor' });
                 }
                 
-                if (userRoles.includes('creador') || userRoles.includes('creador_contenido')) {
+                if (userRoles.includes('creador')) {
                     creadores.push({ ...baseUserData, role_name: 'creador' });
                 }
                 
@@ -437,6 +437,42 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
         console.log('🔧 Admin users found:', adminUsers.rows.map(u => `${u.nickname} (${u.role_name})`));
         console.log('👑 AdminPrincipal in allUsers:', allUsers.rows.find(u => u.nickname === 'AdminPrincipal') ? 'YES' : 'NO');
 
+        // Calcular conteos únicos por rol desde la base de datos
+        const roleCountsQuery = await pool.query(`
+            SELECT 
+                r.name as role_name,
+                COUNT(DISTINCT ur.user_id) as unique_count
+            FROM roles r
+            LEFT JOIN user_roles ur ON r.id = ur.role_id
+            GROUP BY r.name
+            ORDER BY r.name
+        `);
+        
+        let admins = 0, profesores_count = 0, creadores_count = 0, jugadores_count = 0, usuarios_count = 0;
+        
+        roleCountsQuery.rows.forEach(row => {
+            switch (row.role_name) {
+                case 'administrador_principal':
+                case 'administrador_secundario':
+                    admins += parseInt(row.unique_count);
+                    break;
+                case 'profesor':
+                    profesores_count += parseInt(row.unique_count);
+                    break;
+                case 'creador':
+                    creadores_count += parseInt(row.unique_count);
+                    break;
+                case 'jugador':
+                    jugadores_count += parseInt(row.unique_count);
+                    break;
+                case 'usuario':
+                    usuarios_count += parseInt(row.unique_count);
+                    break;
+            }
+        });
+
+        console.log(`📊 CORRECTED Role counts from DB: admins=${admins}, profesores=${profesores_count}, creadores=${creadores_count}, jugadores=${jugadores_count}, usuarios=${usuarios_count}`);
+
         res.json({
             adminSecundarios: adminSecundarios,
             profesoresCreadores: profesoresCreadores,
@@ -445,7 +481,15 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
             jugadores: jugadores,
             usuarios: usuarios,
             availableAdmins: allUsers.rows,
-            ultra_simple_version: true
+            ultra_simple_version: true,
+            // Estadísticas corregidas para el frontend
+            statistics: {
+                admins: admins,
+                profesores: profesores_count,
+                creadores: creadores_count,
+                jugadores: jugadores_count,
+                usuarios: usuarios_count
+            }
         });
 
     } catch (error) {

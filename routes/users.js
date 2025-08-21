@@ -8,7 +8,7 @@ const router = express.Router();
 router.get('/profile', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT u.id, u.nickname, u.email, u.nombre, u.apellido, u.created_at,
+      SELECT u.id, u.nickname, u.email, u.first_name, u.last_name, u.created_at,
         up.answer_history, up.stats, up.preferences, up.loaded_blocks
       FROM users u
       LEFT JOIN user_profiles up ON u.id = up.user_id
@@ -24,8 +24,8 @@ router.get('/profile', authenticateToken, async (req, res) => {
       id: user.id,
       nickname: user.nickname,
       email: user.email,
-      nombre: user.nombre,
-      apellido: user.apellido,
+      firstName: user.first_name,
+      lastName: user.last_name,
       createdAt: user.created_at,
       answerHistory: user.answer_history || [],
       stats: user.stats || {},
@@ -42,7 +42,7 @@ router.get('/profile', authenticateToken, async (req, res) => {
 // Update user profile
 router.put('/profile', authenticateToken, async (req, res) => {
   try {
-    const { email, nombre, apellido, preferences } = req.body;
+    const { email, firstName, lastName, preferences } = req.body;
 
     // Update user basic info
     const updateFields = [];
@@ -53,13 +53,13 @@ router.put('/profile', authenticateToken, async (req, res) => {
       updateFields.push(`email = $${paramIndex++}`);
       updateValues.push(email);
     }
-    if (nombre !== undefined) {
-      updateFields.push(`nombre = $${paramIndex++}`);
-      updateValues.push(nombre);
+    if (firstName !== undefined) {
+      updateFields.push(`first_name = $${paramIndex++}`);
+      updateValues.push(firstName);
     }
-    if (apellido !== undefined) {
-      updateFields.push(`apellido = $${paramIndex++}`);
-      updateValues.push(apellido);
+    if (lastName !== undefined) {
+      updateFields.push(`last_name = $${paramIndex++}`);
+      updateValues.push(lastName);
     }
 
     if (updateFields.length > 0) {
@@ -499,7 +499,7 @@ router.put('/change-password', authenticateToken, async (req, res) => {
 
     // Get user's current password hash
     const userResult = await pool.query(
-      'SELECT password FROM users WHERE id = $1',
+      'SELECT password_hash FROM users WHERE id = $1',
       [req.user.id]
     );
 
@@ -508,7 +508,7 @@ router.put('/change-password', authenticateToken, async (req, res) => {
     }
 
     const bcrypt = require('bcrypt');
-    const isCurrentPasswordValid = await bcrypt.compare(currentPassword, userResult.rows[0].password);
+    const isCurrentPasswordValid = await bcrypt.compare(currentPassword, userResult.rows[0].password_hash);
 
     if (!isCurrentPasswordValid) {
       return res.status(400).json({ error: 'Current password is incorrect' });
@@ -519,7 +519,7 @@ router.put('/change-password', authenticateToken, async (req, res) => {
     const hashedNewPassword = await bcrypt.hash(newPassword, saltRounds);
 
     await pool.query(
-      'UPDATE users SET password = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+      'UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
       [hashedNewPassword, req.user.id]
     );
 

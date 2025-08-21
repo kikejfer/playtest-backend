@@ -14,15 +14,17 @@ router.get('/', authenticateToken, async (req, res) => {
     console.log('🔍 /blocks endpoint called for user:', req.user.id);
     
     const blocksResult = await pool.query(`
-      SELECT b.id, b.name, b.description, b.observaciones, b.creator_id, b.is_public, b.created_at, b.image_url, b.user_role_id,
+      SELECT b.id, b.name, b.description, b.observaciones, b.user_role_id, b.is_public, b.created_at, b.image_url,
         u.nickname as creator_nickname,
+        u.id as creator_id,
         r.name as created_with_role,
         COALESCE(ba.total_questions, 0) as question_count
       FROM blocks b
-      LEFT JOIN users u ON b.creator_id = u.id
-      LEFT JOIN roles r ON b.user_role_id = r.id
+      LEFT JOIN user_roles ur ON b.user_role_id = ur.id
+      LEFT JOIN users u ON ur.user_id = u.id
+      LEFT JOIN roles r ON ur.role_id = r.id
       LEFT JOIN block_answers ba ON b.id = ba.block_id
-      WHERE b.is_public = true OR b.creator_id = $1
+      WHERE b.is_public = true OR ur.user_id = $1
       ORDER BY b.created_at DESC
     `, [req.user.id]);
     
@@ -102,13 +104,15 @@ router.get('/available', authenticateToken, async (req, res) => {
     console.log('🔍 Total public blocks:', testQuery.rows[0]?.total || 0);
     
     const blocksResult = await pool.query(`
-      SELECT b.id, b.name, b.description, b.observaciones, b.creator_id, b.is_public, b.created_at, b.image_url, b.user_role_id,
+      SELECT b.id, b.name, b.description, b.observaciones, b.user_role_id, b.is_public, b.created_at, b.image_url,
         u.nickname as creator_nickname,
+        u.id as creator_id,
         r.name as created_with_role,
         COALESCE(ba.total_questions, 0) as question_count
       FROM blocks b
-      LEFT JOIN users u ON b.creator_id = u.id
-      LEFT JOIN roles r ON b.user_role_id = r.id
+      LEFT JOIN user_roles ur ON b.user_role_id = ur.id
+      LEFT JOIN users u ON ur.user_id = u.id
+      LEFT JOIN roles r ON ur.role_id = r.id
       LEFT JOIN block_answers ba ON b.id = ba.block_id
       WHERE b.is_public = true
       ORDER BY b.created_at DESC
@@ -204,13 +208,15 @@ router.get('/loaded', authenticateToken, async (req, res) => {
     // Get the actual blocks that are loaded
     const placeholders = loadedBlockIds.map((_, index) => `$${index + 2}`).join(',');
     const blocksResult = await pool.query(`
-      SELECT b.id, b.name, b.description, b.observaciones, b.creator_id, b.is_public, b.created_at, b.image_url, b.user_role_id,
+      SELECT b.id, b.name, b.description, b.observaciones, b.user_role_id, b.is_public, b.created_at, b.image_url,
         u.nickname as creator_nickname,
+        u.id as creator_id,
         r.name as created_with_role,
         COALESCE(ba.total_questions, 0) as question_count
       FROM blocks b
-      LEFT JOIN users u ON b.creator_id = u.id
-      LEFT JOIN roles r ON b.user_role_id = r.id
+      LEFT JOIN user_roles ur ON b.user_role_id = ur.id
+      LEFT JOIN users u ON ur.user_id = u.id
+      LEFT JOIN roles r ON ur.role_id = r.id
       LEFT JOIN block_answers ba ON b.id = ba.block_id
       WHERE b.id = ANY($1)
       ORDER BY b.created_at DESC
@@ -294,19 +300,21 @@ router.get('/created', authenticateToken, async (req, res) => {
     console.log('🔍 Database URL:', process.env.DATABASE_URL?.substring(0, 50) + '...');
     
     // Simple query first to test database connection
-    const testQuery = await pool.query('SELECT COUNT(*) as total FROM blocks WHERE creator_id = $1', [req.user.id]);
+    const testQuery = await pool.query('SELECT COUNT(*) as total FROM blocks b LEFT JOIN user_roles ur ON b.user_role_id = ur.id WHERE ur.user_id = $1', [req.user.id]);
     console.log('🔍 Total created blocks for user:', testQuery.rows[0]?.total || 0);
     
     const blocksResult = await pool.query(`
-      SELECT b.id, b.name, b.description, b.observaciones, b.creator_id, b.is_public, b.created_at, b.image_url, b.user_role_id,
+      SELECT b.id, b.name, b.description, b.observaciones, b.user_role_id, b.is_public, b.created_at, b.image_url,
         u.nickname as creator_nickname,
+        u.id as creator_id,
         r.name as created_with_role,
         COALESCE(ba.total_questions, 0) as question_count
       FROM blocks b
-      LEFT JOIN users u ON b.creator_id = u.id
-      LEFT JOIN roles r ON b.user_role_id = r.id
+      LEFT JOIN user_roles ur ON b.user_role_id = ur.id
+      LEFT JOIN users u ON ur.user_id = u.id
+      LEFT JOIN roles r ON ur.role_id = r.id
       LEFT JOIN block_answers ba ON b.id = ba.block_id
-      WHERE b.creator_id = $1
+      WHERE ur.user_id = $1
       ORDER BY b.created_at DESC
     `, [req.user.id]);
 
@@ -385,7 +393,7 @@ router.post('/:id/load', authenticateToken, async (req, res) => {
     
     // Check if block exists and is accessible (public OR owned by user)
     const blockResult = await pool.query(
-      'SELECT id, creator_id, is_public FROM blocks WHERE id = $1 AND (is_public = true OR creator_id = $2)',
+      'SELECT b.id, ur.user_id as creator_id, b.is_public FROM blocks b LEFT JOIN user_roles ur ON b.user_role_id = ur.id WHERE b.id = $1 AND (b.is_public = true OR ur.user_id = $2)',
       [blockId, req.user.id]
     );
     
@@ -475,11 +483,11 @@ router.post('/', authenticateToken, async (req, res) => {
 
     console.log('🔧 Creating block:', { name, description, observaciones, isPublic, userId: req.user.id });
 
-    // Get user's current role for block creation
-    let userRoleId = null;
+    // Get user's active user_role record for block creation
+    let userRoleRecordId = null;
     try {
-      const roleResult = await pool.query(`
-        SELECT ur.role_id 
+      const userRoleResult = await pool.query(`
+        SELECT ur.id, r.name as role_name
         FROM user_roles ur 
         JOIN roles r ON ur.role_id = r.id 
         WHERE ur.user_id = $1 
@@ -493,12 +501,16 @@ router.post('/', authenticateToken, async (req, res) => {
         LIMIT 1
       `, [req.user.id]);
       
-      if (roleResult.rows.length > 0) {
-        userRoleId = roleResult.rows[0].role_id;
-        console.log('👤 User role for block creation:', userRoleId);
+      if (userRoleResult.rows.length > 0) {
+        userRoleRecordId = userRoleResult.rows[0].id;
+        console.log('👤 User role record for block creation:', userRoleRecordId, 'Role:', userRoleResult.rows[0].role_name);
       }
     } catch (roleError) {
-      console.warn('⚠️ Could not determine user role, block will be created without role association:', roleError.message);
+      console.warn('⚠️ Could not determine user role, block creation will fail:', roleError.message);
+    }
+    
+    if (!userRoleRecordId) {
+      return res.status(400).json({ error: 'User must have at least one role to create blocks' });
     }
 
     // Search for related image
@@ -512,10 +524,10 @@ router.post('/', authenticateToken, async (req, res) => {
       imageUrl = imageSearch.getRandomFallbackImage();
     }
 
-    // Create the block with image, observations, and user role
+    // Create the block with image, observations, and user_role_id
     const result = await pool.query(
-      'INSERT INTO blocks (name, description, observaciones, creator_id, is_public, image_url, user_role_id) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
-      [name, description, observaciones, req.user.id, isPublic, imageUrl, userRoleId]
+      'INSERT INTO blocks (name, description, observaciones, user_role_id, is_public, image_url) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+      [name, description, observaciones, userRoleRecordId, isPublic, imageUrl]
     );
 
     const newBlock = result.rows[0];
@@ -588,7 +600,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
     // Check if user owns the block
     const ownerCheck = await pool.query(
-      'SELECT creator_id FROM blocks WHERE id = $1',
+      'SELECT ur.user_id as creator_id FROM blocks b LEFT JOIN user_roles ur ON b.user_role_id = ur.id WHERE b.id = $1',
       [blockId]
     );
 
@@ -708,7 +720,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 
     // Check if user owns the block
     const ownerCheck = await pool.query(
-      'SELECT creator_id FROM blocks WHERE id = $1',
+      'SELECT ur.user_id as creator_id FROM blocks b LEFT JOIN user_roles ur ON b.user_role_id = ur.id WHERE b.id = $1',
       [blockId]
     );
 
@@ -920,7 +932,7 @@ router.post('/:id/validate', authenticateToken, async (req, res) => {
     
     // Check if user owns the block
     const ownerCheck = await pool.query(
-      'SELECT creator_id FROM blocks WHERE id = $1',
+      'SELECT ur.user_id as creator_id FROM blocks b LEFT JOIN user_roles ur ON b.user_role_id = ur.id WHERE b.id = $1',
       [blockId]
     );
 
@@ -965,7 +977,7 @@ router.patch('/:id/state', authenticateToken, async (req, res) => {
     
     // Check if user owns the block
     const ownerCheck = await pool.query(
-      'SELECT creator_id FROM blocks WHERE id = $1',
+      'SELECT ur.user_id as creator_id FROM blocks b LEFT JOIN user_roles ur ON b.user_role_id = ur.id WHERE b.id = $1',
       [blockId]
     );
 
@@ -1080,7 +1092,7 @@ router.post('/:id/regenerate-image', authenticateToken, async (req, res) => {
     
     // Check if user owns the block
     const ownerCheck = await pool.query(
-      'SELECT creator_id, name, description, knowledge_area_id FROM blocks WHERE id = $1',
+      'SELECT ur.user_id as creator_id, b.name, b.description, b.knowledge_area_id FROM blocks b LEFT JOIN user_roles ur ON b.user_role_id = ur.id WHERE b.id = $1',
       [blockId]
     );
 
@@ -1148,7 +1160,7 @@ router.get('/:id/complete', authenticateToken, async (req, res) => {
 
     const block = result.rows[0];
     
-    // Check access permissions
+    // Check access permissions (creator_id comes from the view which includes the JOIN)
     if (block.block_state !== 'public' && block.creator_id !== req.user.id) {
       return res.status(403).json({ error: 'No tienes acceso a este bloque' });
     }
