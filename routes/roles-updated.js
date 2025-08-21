@@ -508,7 +508,21 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
             }
         });
 
-        console.log(`📊 CORRECTED Role counts from DB: admins=${admins}, profesores=${profesores_count}, creadores=${creadores_count}, jugadores=${jugadores_count}, usuarios=${usuarios_count}`);
+        // Obtener el total real de usuarios en la tabla users
+        const totalUsersQuery = await pool.query('SELECT COUNT(*) as total FROM users');
+        const usuarios_count_real = parseInt(totalUsersQuery.rows[0].total) || 0;
+
+        // Calcular bloques totales y preguntas totales para PAP
+        const bloquesTotalesQuery = await pool.query('SELECT COUNT(*) as total FROM blocks');
+        const bloques_totales = parseInt(bloquesTotalesQuery.rows[0].total) || 0;
+
+        const preguntasTotalesQuery = await pool.query(`
+            SELECT COALESCE(SUM(ba.total_questions), 0) as total 
+            FROM block_answers ba
+        `);
+        const preguntas_totales = parseInt(preguntasTotalesQuery.rows[0].total) || 0;
+
+        console.log(`📊 CORRECTED Role counts from DB: admins=${admins}, profesores=${profesores_count}, creadores=${creadores_count}, jugadores=${jugadores_count}, usuarios=${usuarios_count_real} (total users in table), bloques=${bloques_totales}, preguntas=${preguntas_totales}`);
 
         // Separar jugadores en dos paneles: AdminPrincipal vs resto de administradores
         const adminPrincipalId = adminSecundarios.find(admin => admin.role_name === 'administrador_principal')?.id;
@@ -540,7 +554,9 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                 profesores: profesores_count,
                 creadores: creadores_count,
                 jugadores: jugadores_count,
-                usuarios: usuarios_count
+                usuarios: usuarios_count_real,
+                bloques: bloques_totales,
+                preguntas: preguntas_totales
             }
         });
 
@@ -757,27 +773,65 @@ router.get('/admin-secundario-panel', authenticateToken, async (req, res) => {
                 };
             });
 
-        // Calcular estadísticas por rol
-        const roleCountsQuery = await pool.query(`
-            SELECT 
-                r.name as role_name,
-                COUNT(DISTINCT ur.user_id) as unique_count
-            FROM roles r
-            LEFT JOIN user_roles ur ON r.id = ur.role_id
-            GROUP BY r.name
-            ORDER BY r.name
-        `);
+        // Obtener el ID del administrador actual desde el token
+        const currentAdminId = req.user.id;
+        console.log('📋 Admin secundario ID:', currentAdminId);
+
+        // Calcular estadísticas específicas para este administrador
+        const profesoresAssignedQuery = await pool.query(`
+            SELECT COUNT(DISTINCT u.id) as count
+            FROM users u
+            JOIN user_roles ur ON u.id = ur.user_id
+            JOIN roles r ON ur.role_id = r.id
+            LEFT JOIN admin_assignments aa ON u.id = aa.user_id
+            WHERE r.name = 'profesor' AND (aa.admin_id = $1 OR aa.admin_id IS NULL)
+        `, [currentAdminId]);
+
+        const creadoresAssignedQuery = await pool.query(`
+            SELECT COUNT(DISTINCT u.id) as count
+            FROM users u
+            JOIN user_roles ur ON u.id = ur.user_id
+            JOIN roles r ON ur.role_id = r.id
+            LEFT JOIN admin_assignments aa ON u.id = aa.user_id
+            WHERE r.name = 'creador' AND (aa.admin_id = $1 OR aa.admin_id IS NULL)
+        `, [currentAdminId]);
+
+        const jugadoresAssignedQuery = await pool.query(`
+            SELECT COUNT(DISTINCT u.id) as count
+            FROM users u
+            JOIN user_roles ur ON u.id = ur.user_id
+            JOIN roles r ON ur.role_id = r.id
+            LEFT JOIN admin_assignments aa ON u.id = aa.user_id
+            WHERE r.name = 'jugador' AND (aa.admin_id = $1 OR aa.admin_id IS NULL)
+        `, [currentAdminId]);
         
-        let profesores_count = 0, creadores_count = 0, jugadores_count = 0, usuarios_count = 0;
-        
-        roleCountsQuery.rows.forEach(row => {
-            switch (row.role_name) {
-                case 'profesor': profesores_count += parseInt(row.unique_count); break;
-                case 'creador': creadores_count += parseInt(row.unique_count); break;
-                case 'jugador': jugadores_count += parseInt(row.unique_count); break;
-                case 'usuario': usuarios_count += parseInt(row.unique_count); break;
-            }
-        });
+        const profesores_count = parseInt(profesoresAssignedQuery.rows[0]?.count) || 0;
+        const creadores_count = parseInt(creadoresAssignedQuery.rows[0]?.count) || 0;
+        const jugadores_count = parseInt(jugadoresAssignedQuery.rows[0]?.count) || 0;
+        const usuarios_count = 0; // No se usa en PAS
+
+        // Calcular bloques y preguntas específicos del administrador
+        const bloquesAdminQuery = await pool.query(`
+            SELECT COUNT(DISTINCT b.id) as count
+            FROM blocks b
+            JOIN user_roles ur ON b.user_role_id = ur.id
+            JOIN users u ON ur.user_id = u.id
+            LEFT JOIN admin_assignments aa ON u.id = aa.user_id
+            WHERE aa.admin_id = $1 OR aa.admin_id IS NULL
+        `, [currentAdminId]);
+
+        const preguntasAdminQuery = await pool.query(`
+            SELECT COALESCE(SUM(ba.total_questions), 0) as count
+            FROM block_answers ba
+            JOIN blocks b ON ba.block_id = b.id
+            JOIN user_roles ur ON b.user_role_id = ur.id
+            JOIN users u ON ur.user_id = u.id
+            LEFT JOIN admin_assignments aa ON u.id = aa.user_id
+            WHERE aa.admin_id = $1 OR aa.admin_id IS NULL
+        `, [currentAdminId]);
+
+        const bloques_count = parseInt(bloquesAdminQuery.rows[0]?.count) || 0;
+        const preguntas_count = parseInt(preguntasAdminQuery.rows[0]?.count) || 0;
 
         res.json({
             // Mismo formato que PAP pero SIN adminSecundarios
@@ -792,7 +846,9 @@ router.get('/admin-secundario-panel', authenticateToken, async (req, res) => {
                 profesores: profesores_count,
                 creadores: creadores_count,
                 jugadores: jugadores_count,
-                usuarios: usuarios_count
+                usuarios: usuarios_count,
+                bloques: bloques_count,
+                preguntas: preguntas_count
             }
         });
 
