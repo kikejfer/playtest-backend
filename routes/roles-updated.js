@@ -58,67 +58,18 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
         // Solo consultas básicas y seguras
         const allUsers = await pool.query('SELECT id, nickname, COALESCE(email, \'Sin email\') as email FROM users ORDER BY id');
         
-        // Obtener TODOS los usuarios con sus estadísticas de bloques (incluso si no tienen)
+        // Obtener usuarios básicos sin contar bloques aquí (se calculará por rol específico después)
         const allUsersWithStats = await pool.query(`
             SELECT DISTINCT 
                 u.id, 
                 u.nickname, 
-                COALESCE(u.email, 'Sin email') as email, 
-                COALESCE(COUNT(DISTINCT b.id), 0) as block_count
+                COALESCE(u.email, 'Sin email') as email,
+                COALESCE(u.first_name, '') as first_name
             FROM users u 
-            LEFT JOIN blocks b ON u.id = b.user_id
-            GROUP BY u.id, u.nickname, u.email
             ORDER BY u.id
         `);
         
-        // Intentar obtener estadísticas adicionales de forma segura para usuarios con bloques
-        const blockStatsPromises = allUsersWithStats.rows
-            .filter(user => user.block_count > 0)
-            .map(async (user) => {
-            try {
-                // Contar preguntas y temas desde topic_answers para cada bloque del usuario
-                const questionStats = await pool.query(`
-                    SELECT 
-                        COALESCE(COUNT(DISTINCT ta.id), 0) as total_questions,
-                        COALESCE(COUNT(DISTINCT ta.topic), 0) as total_topics
-                    FROM blocks b
-                    LEFT JOIN topic_answers ta ON b.id = ta.block_id
-                    WHERE b.user_id = $1
-                `, [user.id]);
-                
-                user.total_questions = parseInt(questionStats.rows[0].total_questions) || 0;
-                user.total_topics = parseInt(questionStats.rows[0].total_topics) || 0;
-            } catch (e) {
-                user.total_questions = 0;
-                user.total_topics = 0;
-            }
-            
-            try {
-                // Contar usuarios que han cargado bloques de este creador usando user_loaded_blocks
-                const userBlockStats = await pool.query(`
-                    SELECT COUNT(DISTINCT ulb.user_id) as total_users
-                    FROM blocks b
-                    LEFT JOIN user_loaded_blocks ulb ON b.id = ulb.block_id
-                    WHERE b.user_id = $1
-                `, [user.id]);
-                
-                user.total_users_blocks = parseInt(userBlockStats.rows[0].total_users) || 0;
-                console.log(`User ${user.nickname}: questions=${user.total_questions}, users=${user.total_users_blocks}`);
-            } catch (e) {
-                user.total_users_blocks = 0;
-            }
-            
-            return user;
-        });
-        
-        // Esperar a que se resuelvan todas las consultas
-        try {
-            await Promise.all(blockStatsPromises);
-        } catch (e) {
-            console.warn('Some block statistics queries failed, using defaults:', e.message);
-        }
-        
-        const blockCreatorIds = new Set(allUsersWithStats.rows.filter(u => u.block_count > 0).map(u => u.id));
+        // Las estadísticas por rol se calcularán más adelante para cada usuario según su rol específico
         
         // Obtener usuarios con roles administrativos
         const adminUsers = await pool.query(`
@@ -138,6 +89,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
         let adminUserCounts = {};
         let adminBlockCounts = {};
         let adminQuestionCounts = {};
+        let adminJugadoresCounts = {};
         
         try {
             // Contar usuarios asignados por administrador
@@ -168,36 +120,59 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                 adminBlockCounts[row.admin_id] = parseInt(row.block_count) || 0;
                 adminQuestionCounts[row.admin_id] = parseInt(row.question_count) || 0;
             });
+            
+            // Contar jugadores asignados por administrador
+            const jugadoresCounts = await pool.query(`
+                SELECT aa.admin_id, COUNT(DISTINCT ur.user_id) as jugadores_count
+                FROM admin_assignments aa
+                JOIN user_roles ur ON aa.assigned_user_id = ur.user_id
+                JOIN roles r ON ur.role_id = r.id
+                WHERE r.name = 'jugador'
+                GROUP BY aa.admin_id
+            `);
+            
+            jugadoresCounts.rows.forEach(row => {
+                adminJugadoresCounts[row.admin_id] = parseInt(row.jugadores_count) || 0;
+            });
         } catch (e) {
             console.log('Error calculating admin stats, using defaults:', e.message);
         }
 
-        // AdminPrincipal y administradores secundarios
-        const adminSecundarios = adminUsers.rows.map(user => ({
-            id: user.id,
-            nickname: user.nickname,
-            email: user.email,
-            first_name: '', last_name: '',
-            assigned_creators_count: adminUserCounts[user.id] || 0, 
-            total_blocks_assigned: adminBlockCounts[user.id] || 0, 
-            total_questions_assigned: adminQuestionCounts[user.id] || 0, 
-            luminarias: 0,
-            role_name: user.role_name
-        }));
+        // AdminPrincipal y administradores secundarios  
+        const adminSecundarios = adminUsers.rows.map(user => {
+            // Buscar first_name del usuario
+            const userData = allUsersWithStats.rows.find(u => u.id === user.id);
+            return {
+                id: user.id,
+                nickname: user.nickname,
+                email: user.email,
+                first_name: userData?.first_name || '', 
+                last_name: '',
+                assigned_creators_count: adminUserCounts[user.id] || 0, 
+                total_blocks_assigned: adminBlockCounts[user.id] || 0, 
+                total_questions_assigned: adminQuestionCounts[user.id] || 0,
+                jugadores: adminJugadoresCounts[user.id] || 0,
+                luminarias: 0,
+                role_name: user.role_name
+            };
+        });
         
         // Si AdminPrincipal no tiene rol asignado, añadirlo manualmente
         const adminPrincipalExists = adminSecundarios.some(admin => admin.nickname === 'AdminPrincipal');
         if (!adminPrincipalExists) {
             const adminPrincipal = allUsers.rows.find(user => user.nickname === 'AdminPrincipal');
             if (adminPrincipal) {
+                const adminPrincipalData = allUsersWithStats.rows.find(u => u.id === adminPrincipal.id);
                 adminSecundarios.push({
                     id: adminPrincipal.id,
                     nickname: adminPrincipal.nickname,
                     email: adminPrincipal.email,
-                    first_name: '', last_name: '',
+                    first_name: adminPrincipalData?.first_name || '', 
+                    last_name: '',
                     assigned_creators_count: adminUserCounts[adminPrincipal.id] || 0, 
                     total_blocks_assigned: adminBlockCounts[adminPrincipal.id] || 0, 
-                    total_questions_assigned: adminQuestionCounts[adminPrincipal.id] || 0, 
+                    total_questions_assigned: adminQuestionCounts[adminPrincipal.id] || 0,
+                    jugadores: adminJugadoresCounts[adminPrincipal.id] || 0,
                     luminarias: 0,
                     role_name: 'administrador_principal'
                 });
@@ -211,7 +186,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
         let adminAssignments = {};
         try {
             const assignments = await pool.query(`
-                SELECT aa.assigned_user_id, aa.admin_id, u.nickname as admin_nickname
+                SELECT aa.assigned_user_id, aa.admin_id, u.nickname as admin_nickname, aa.assigned_at
                 FROM admin_assignments aa
                 JOIN users u ON aa.admin_id = u.id
             `);
@@ -219,7 +194,8 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
             assignments.rows.forEach(assignment => {
                 adminAssignments[assignment.assigned_user_id] = {
                     admin_id: assignment.admin_id,
-                    admin_nickname: assignment.admin_nickname
+                    admin_nickname: assignment.admin_nickname,
+                    assigned_at: assignment.assigned_at
                 };
             });
         } catch (e) {
@@ -241,7 +217,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
 
         // Obtener TODOS los usuarios que tienen roles relevantes
         const usersWithRolesQuery = await pool.query(`
-            SELECT DISTINCT u.id, u.nickname, COALESCE(u.email, 'Sin email') as email
+            SELECT DISTINCT u.id, u.nickname, COALESCE(u.email, 'Sin email') as email, COALESCE(u.first_name, '') as first_name
             FROM users u
             INNER JOIN user_roles ur ON u.id = ur.user_id
             INNER JOIN roles r ON ur.role_id = r.id
@@ -252,94 +228,92 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
         
         console.log(`🔍 Found ${usersWithRolesQuery.rows.length} users with relevant roles`);
         
-        // Procesar usuarios con roles y obtener sus estadísticas
-        const userRolesPromises = usersWithRolesQuery.rows.map(async (user) => {
-            // Buscar estadísticas de bloques para este usuario
-            const userStats = allUsersWithStats.rows.find(stat => stat.id === user.id);
-            user.block_count = userStats ? userStats.block_count : 0;
-            try {
-                // Obtener TODOS los roles del usuario para determinar el más relevante
-                const allRolesResult = await pool.query(`
-                    SELECT r.name as role_name
-                    FROM user_roles ur
-                    JOIN roles r ON ur.role_id = r.id
-                    WHERE ur.user_id = $1
-                    ORDER BY r.name
-                `, [user.id]);
-                
-                const userRoles = allRolesResult.rows.map(row => row.role_name);
-                console.log(`👤 User ${user.nickname} (ID: ${user.id}) has roles:`, userRoles);
-                
-                // Determinar el rol más relevante según jerarquía
-                if (userRoles.includes('administrador_principal')) {
-                    user.actual_role_name = 'administrador_principal';
-                } else if (userRoles.includes('administrador_secundario')) {
-                    user.actual_role_name = 'administrador_secundario';
-                } else if (userRoles.includes('creador')) {
-                    user.actual_role_name = 'creador';
-                } else if (userRoles.includes('profesor')) {
-                    user.actual_role_name = 'profesor';
-                } else {
-                    user.actual_role_name = 'usuario';
-                }
-                
-                // Calcular estadísticas de preguntas y usuarios para este usuario
-                if (user.block_count > 0) {
-                    try {
-                        // Contar preguntas y temas desde topic_answers
-                        const questionStats = await pool.query(`
-                            SELECT 
-                                COALESCE(COUNT(DISTINCT ta.id), 0) as total_questions,
-                                COALESCE(COUNT(DISTINCT ta.topic), 0) as total_topics
-                            FROM blocks b
-                            LEFT JOIN topic_answers ta ON b.id = ta.block_id
-                            WHERE b.user_id = $1
-                        `, [user.id]);
-                        
-                        user.total_questions = parseInt(questionStats.rows[0].total_questions) || 0;
-                        user.total_topics = parseInt(questionStats.rows[0].total_topics) || 0;
-                        
-                        // Contar usuarios que han cargado bloques de este usuario
-                        const userBlockStats = await pool.query(`
-                            SELECT COUNT(DISTINCT ulb.user_id) as total_users
-                            FROM blocks b
-                            LEFT JOIN user_loaded_blocks ulb ON b.id = ulb.block_id
-                            WHERE b.user_id = $1
-                        `, [user.id]);
-                        
-                        user.total_users_blocks = parseInt(userBlockStats.rows[0].total_users) || 0;
-                        
-                    } catch (e) {
-                        console.warn(`Error calculating stats for user ${user.id}:`, e.message);
-                        user.total_questions = 0;
-                        user.total_topics = 0;
-                        user.total_users_blocks = 0;
-                    }
-                } else {
-                    user.total_questions = 0;
-                    user.total_topics = 0;
-                    user.total_users_blocks = 0;
-                }
-                
-                return user;
-            } catch (e) {
-                console.warn(`Could not get role for user ${user.id}:`, e.message);
-                user.actual_role_name = 'usuario';
-                return user;
-            }
-        });
-        
-        const usersWithRoles = await Promise.all(userRolesPromises);
+        // Simplificar: solo obtener usuarios y sus roles, sin calcular estadísticas aquí
+        const usersWithRoles = usersWithRolesQuery.rows;
         
         // IDs de usuarios que han creado bloques (para excluir de usuarios normales)
         const rolesCreatorIds = new Set(usersWithRoles.map(user => user.id));
         
         // Log de roles encontrados
-        console.log('👥 Users with blocks and their roles:');
-        usersWithRoles.forEach(user => {
-            console.log(`  - ${user.nickname}: ${user.actual_role_name} (${user.block_count} blocks)`);
-        });
+        console.log('👥 Users with roles found:', usersWithRoles.length);
 
+        // Funciones para calcular estadísticas por rol específico
+        async function calculateStatsForRole(userId, roleName) {
+            try {
+                // 1. Contar bloques creados con rol específico
+                const blocksQuery = await pool.query(`
+                    SELECT COUNT(DISTINCT b.id) as blocks_count
+                    FROM blocks b
+                    JOIN user_roles ur ON b.user_role_id = ur.id
+                    JOIN roles r ON ur.role_id = r.id
+                    WHERE b.user_id = $1 AND r.name = $2
+                `, [userId, roleName]);
+                
+                const blocksCount = parseInt(blocksQuery.rows[0].blocks_count) || 0;
+                
+                if (blocksCount === 0) {
+                    return {
+                        blocks_created: 0,
+                        total_questions: 0,
+                        total_topics: 0,
+                        total_users: 0
+                    };
+                }
+                
+                // 2. Contar preguntas usando block_answers.total_questions
+                const questionsQuery = await pool.query(`
+                    SELECT COALESCE(SUM(ba.total_questions), 0) as total_questions
+                    FROM blocks b
+                    JOIN user_roles ur ON b.user_role_id = ur.id
+                    JOIN roles r ON ur.role_id = r.id
+                    LEFT JOIN block_answers ba ON b.id = ba.block_id
+                    WHERE b.user_id = $1 AND r.name = $2
+                `, [userId, roleName]);
+                
+                const totalQuestions = parseInt(questionsQuery.rows[0].total_questions) || 0;
+                
+                // 3. Contar temas únicos
+                const topicsQuery = await pool.query(`
+                    SELECT COUNT(DISTINCT ta.topic) as total_topics
+                    FROM blocks b
+                    JOIN user_roles ur ON b.user_role_id = ur.id
+                    JOIN roles r ON ur.role_id = r.id
+                    LEFT JOIN topic_answers ta ON b.id = ta.block_id
+                    WHERE b.user_id = $1 AND r.name = $2
+                `, [userId, roleName]);
+                
+                const totalTopics = parseInt(topicsQuery.rows[0].total_topics) || 0;
+                
+                // 4. Contar usuarios que han cargado bloques de este rol
+                const usersQuery = await pool.query(`
+                    SELECT COUNT(DISTINCT ulb.user_id) as total_users
+                    FROM blocks b
+                    JOIN user_roles ur ON b.user_role_id = ur.id
+                    JOIN roles r ON ur.role_id = r.id
+                    LEFT JOIN user_loaded_blocks ulb ON b.id = ulb.block_id
+                    WHERE b.user_id = $1 AND r.name = $2
+                `, [userId, roleName]);
+                
+                const totalUsers = parseInt(usersQuery.rows[0].total_users) || 0;
+                
+                return {
+                    blocks_created: blocksCount,
+                    total_questions: totalQuestions,
+                    total_topics: totalTopics,
+                    total_users: totalUsers
+                };
+                
+            } catch (e) {
+                console.warn(`Error calculating stats for user ${userId} role ${roleName}:`, e.message);
+                return {
+                    blocks_created: 0,
+                    total_questions: 0,
+                    total_topics: 0,
+                    total_users: 0
+                };
+            }
+        }
+        
         // Crear listas separadas por rol (usuarios pueden aparecer en múltiples listas)
         const profesores = [];
         const creadores = [];
@@ -349,16 +323,27 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
         for (const user of usersWithRoles) {
             if (adminIds.has(user.id)) continue; // Excluir administradores
             
-            const assignment = adminAssignments[user.id] || { admin_id: 0, admin_nickname: 'Sin asignar' };
+            // Los no asignados corresponden al Administrador Principal
+            const adminPrincipal = adminSecundarios.find(admin => admin.role_name === 'administrador_principal');
+            const assignment = adminAssignments[user.id] || { 
+                admin_id: adminPrincipal?.id || 0, 
+                admin_nickname: adminPrincipal?.nickname || 'AdminPrincipal', 
+                assigned_at: null 
+            };
             const baseUserData = {
-                id: user.id, nickname: user.nickname, email: user.email,
-                first_name: '', last_name: '', 
+                id: user.id, 
+                nickname: user.nickname, 
+                email: user.email,
+                first_name: user.first_name || '', 
+                last_name: '', 
                 assigned_admin_id: assignment.admin_id, 
                 assigned_admin_nickname: assignment.admin_nickname,
-                blocks_created: parseInt(user.block_count) || 0, 
-                total_questions: parseInt(user.total_questions) || 0, 
-                total_users_blocks: parseInt(user.total_users_blocks) || 0,
-                luminarias_actuales: 0, luminarias_ganadas: 0, luminarias_gastadas: 0, luminarias_abonadas: 0, luminarias_compradas: 0
+                asignacion: assignment.assigned_at ? new Date(assignment.assigned_at).toLocaleDateString() : 'Administrador Principal',
+                luminarias_actuales: 0, 
+                luminarias_ganadas: 0, 
+                luminarias_gastadas: 0, 
+                luminarias_abonadas: 0, 
+                luminarias_compradas: 0
             };
             
             // Obtener todos los roles del usuario
@@ -373,17 +358,54 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                 const userRoles = userRolesResult.rows.map(row => row.role_name);
                 console.log(`👤 User ${user.nickname} (ID: ${user.id}) has roles:`, userRoles);
                 
-                // Agregar a las listas correspondientes según roles
+                // Agregar a las listas correspondientes según roles con estadísticas correctas
                 if (userRoles.includes('profesor')) {
-                    profesores.push({ ...baseUserData, role_name: 'profesor' });
+                    const profesorStats = await calculateStatsForRole(user.id, 'profesor');
+                    profesores.push({ 
+                        ...baseUserData, 
+                        role_name: 'profesor',
+                        blocks_created: profesorStats.blocks_created,
+                        total_questions: profesorStats.total_questions,
+                        total_topics: profesorStats.total_topics,
+                        estudiantes: profesorStats.total_users
+                    });
                 }
                 
                 if (userRoles.includes('creador')) {
-                    creadores.push({ ...baseUserData, role_name: 'creador' });
+                    const creadorStats = await calculateStatsForRole(user.id, 'creador');
+                    creadores.push({ 
+                        ...baseUserData, 
+                        role_name: 'creador',
+                        blocks_created: creadorStats.blocks_created,
+                        total_questions: creadorStats.total_questions,
+                        total_topics: creadorStats.total_topics,
+                        usuarios: creadorStats.total_users
+                    });
                 }
                 
                 if (userRoles.includes('jugador') || userRoles.some(role => role.includes('jugador'))) {
-                    jugadores.push({ ...baseUserData, role_name: 'jugador' });
+                    // Calcular bloques cargados para jugadores desde user_loaded_blocks
+                    try {
+                        const bloquesQuery = await pool.query(`
+                            SELECT COUNT(DISTINCT ulb.block_id) as bloques_cargados
+                            FROM user_loaded_blocks ulb
+                            WHERE ulb.user_id = $1
+                        `, [user.id]);
+                        
+                        const bloquesCargados = parseInt(bloquesQuery.rows[0].bloques_cargados) || 0;
+                        
+                        jugadores.push({ 
+                            ...baseUserData, 
+                            role_name: 'jugador',
+                            bloques: bloquesCargados
+                        });
+                    } catch (e) {
+                        jugadores.push({ 
+                            ...baseUserData, 
+                            role_name: 'jugador',
+                            bloques: 0
+                        });
+                    }
                 }
                 
             } catch (e) {
@@ -398,14 +420,29 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
         const usuarios = allUsers.rows
             .filter(user => !adminIds.has(user.id) && !rolesCreatorIds.has(user.id))
             .map(user => {
-                const assignment = adminAssignments[user.id] || { admin_id: 0, admin_nickname: 'Sin asignar' };
+                // Los no asignados corresponden al Administrador Principal
+                const adminPrincipal = adminSecundarios.find(admin => admin.role_name === 'administrador_principal');
+                const assignment = adminAssignments[user.id] || { 
+                    admin_id: adminPrincipal?.id || 0, 
+                    admin_nickname: adminPrincipal?.nickname || 'AdminPrincipal', 
+                    assigned_at: null 
+                };
+                const userData = allUsersWithStats.rows.find(u => u.id === user.id);
                 return {
-                    id: user.id, nickname: user.nickname, email: user.email,
-                    first_name: '', last_name: '', 
+                    id: user.id, 
+                    nickname: user.nickname, 
+                    email: user.email,
+                    first_name: userData?.first_name || '', 
+                    last_name: '', 
                     assigned_admin_id: assignment.admin_id, 
-                    assigned_admin_nickname: assignment.admin_nickname, 
+                    assigned_admin_nickname: assignment.admin_nickname,
+                    asignacion: assignment.assigned_at ? new Date(assignment.assigned_at).toLocaleDateString() : 'Administrador Principal',
                     blocks_loaded: 0,
-                    luminarias_actuales: 0, luminarias_ganadas: 0, luminarias_gastadas: 0, luminarias_abonadas: 0, luminarias_compradas: 0,
+                    luminarias_actuales: 0, 
+                    luminarias_ganadas: 0, 
+                    luminarias_gastadas: 0, 
+                    luminarias_abonadas: 0, 
+                    luminarias_compradas: 0,
                     role_name: 'usuario'
                 };
             });
@@ -473,12 +510,27 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
 
         console.log(`📊 CORRECTED Role counts from DB: admins=${admins}, profesores=${profesores_count}, creadores=${creadores_count}, jugadores=${jugadores_count}, usuarios=${usuarios_count}`);
 
+        // Separar jugadores en dos paneles: AdminPrincipal vs resto de administradores
+        const adminPrincipalId = adminSecundarios.find(admin => admin.role_name === 'administrador_principal')?.id;
+        
+        const jugadoresAdminPrincipal = jugadores.filter(jugador => 
+            jugador.assigned_admin_id === adminPrincipalId || jugador.assigned_admin_id === 0 || jugador.assigned_admin_id === null
+        );
+        const jugadoresOtrosAdmins = jugadores.filter(jugador => 
+            jugador.assigned_admin_id !== adminPrincipalId && 
+            jugador.assigned_admin_id !== 0 && 
+            jugador.assigned_admin_id !== null &&
+            !jugadoresAdminPrincipal.some(ap => ap.user_id === jugador.user_id)
+        );
+
         res.json({
             adminSecundarios: adminSecundarios,
             profesoresCreadores: profesoresCreadores,
             profesores: profesores,
             creadores: creadores,
-            jugadores: jugadores,
+            jugadores: jugadores, // Mantener para compatibilidad
+            jugadoresAdminPrincipal: jugadoresAdminPrincipal,
+            jugadoresOtrosAdmins: jugadoresOtrosAdmins,
             usuarios: usuarios,
             availableAdmins: allUsers.rows,
             ultra_simple_version: true,
@@ -494,6 +546,258 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
 
     } catch (error) {
         console.error('Error in ultra simple admin panel:', error);
+        res.status(500).json({ error: 'Error interno del servidor', details: error.message });
+    }
+});
+
+// Panel secundario (sin sección de administradores)
+router.get('/admin-secundario-panel', authenticateToken, async (req, res) => {
+    try {
+        console.log('🔥 ADMIN SECUNDARIO PANEL - sin sección administradores');
+        
+        // Reutilizar toda la lógica del panel principal pero sin adminSecundarios
+        // Obtener usuarios básicos
+        const allUsers = await pool.query('SELECT id, nickname, COALESCE(email, \'Sin email\') as email FROM users ORDER BY id');
+        
+        const allUsersWithStats = await pool.query(`
+            SELECT DISTINCT 
+                u.id, 
+                u.nickname, 
+                COALESCE(u.email, 'Sin email') as email,
+                COALESCE(u.first_name, '') as first_name
+            FROM users u 
+            ORDER BY u.id
+        `);
+        
+        // Obtener usuarios que tienen roles relevantes (excluyendo administradores)
+        const usersWithRolesQuery = await pool.query(`
+            SELECT DISTINCT u.id, u.nickname, COALESCE(u.email, 'Sin email') as email, COALESCE(u.first_name, '') as first_name
+            FROM users u
+            INNER JOIN user_roles ur ON u.id = ur.user_id
+            INNER JOIN roles r ON ur.role_id = r.id
+            WHERE r.name IN ('profesor', 'creador', 'jugador') 
+            ORDER BY u.id
+        `);
+        
+        const usersWithRoles = usersWithRolesQuery.rows;
+        
+        // Reutilizar función de cálculos de estadísticas
+        async function calculateStatsForRole(userId, roleName) {
+            try {
+                const blocksQuery = await pool.query(`
+                    SELECT COUNT(DISTINCT b.id) as blocks_count
+                    FROM blocks b
+                    JOIN user_roles ur ON b.user_role_id = ur.id
+                    JOIN roles r ON ur.role_id = r.id
+                    WHERE b.user_id = $1 AND r.name = $2
+                `, [userId, roleName]);
+                
+                const blocksCount = parseInt(blocksQuery.rows[0].blocks_count) || 0;
+                
+                if (blocksCount === 0) {
+                    return { blocks_created: 0, total_questions: 0, total_topics: 0, total_users: 0 };
+                }
+                
+                const questionsQuery = await pool.query(`
+                    SELECT COALESCE(SUM(ba.total_questions), 0) as total_questions
+                    FROM blocks b
+                    JOIN user_roles ur ON b.user_role_id = ur.id
+                    JOIN roles r ON ur.role_id = r.id
+                    LEFT JOIN block_answers ba ON b.id = ba.block_id
+                    WHERE b.user_id = $1 AND r.name = $2
+                `, [userId, roleName]);
+                
+                const totalQuestions = parseInt(questionsQuery.rows[0].total_questions) || 0;
+                
+                const topicsQuery = await pool.query(`
+                    SELECT COUNT(DISTINCT ta.topic) as total_topics
+                    FROM blocks b
+                    JOIN user_roles ur ON b.user_role_id = ur.id
+                    JOIN roles r ON ur.role_id = r.id
+                    LEFT JOIN topic_answers ta ON b.id = ta.block_id
+                    WHERE b.user_id = $1 AND r.name = $2
+                `, [userId, roleName]);
+                
+                const totalTopics = parseInt(topicsQuery.rows[0].total_topics) || 0;
+                
+                const usersQuery = await pool.query(`
+                    SELECT COUNT(DISTINCT ulb.user_id) as total_users
+                    FROM blocks b
+                    JOIN user_roles ur ON b.user_role_id = ur.id
+                    JOIN roles r ON ur.role_id = r.id
+                    LEFT JOIN user_loaded_blocks ulb ON b.id = ulb.block_id
+                    WHERE b.user_id = $1 AND r.name = $2
+                `, [userId, roleName]);
+                
+                const totalUsers = parseInt(usersQuery.rows[0].total_users) || 0;
+                
+                return {
+                    blocks_created: blocksCount,
+                    total_questions: totalQuestions,
+                    total_topics: totalTopics,
+                    total_users: totalUsers
+                };
+                
+            } catch (e) {
+                return { blocks_created: 0, total_questions: 0, total_topics: 0, total_users: 0 };
+            }
+        }
+        
+        // Obtener asignaciones (simplificado para PAS)
+        let adminAssignments = {};
+        try {
+            const assignments = await pool.query(`
+                SELECT aa.assigned_user_id, aa.admin_id, u.nickname as admin_nickname, aa.assigned_at
+                FROM admin_assignments aa
+                JOIN users u ON aa.admin_id = u.id
+            `);
+            
+            assignments.rows.forEach(assignment => {
+                adminAssignments[assignment.assigned_user_id] = {
+                    admin_id: assignment.admin_id,
+                    admin_nickname: assignment.admin_nickname,
+                    assigned_at: assignment.assigned_at
+                };
+            });
+        } catch (e) {
+            console.log('Admin assignments table does not exist yet, using defaults');
+        }
+        
+        // Crear listas (sin administradores)
+        const profesores = [];
+        const creadores = [];
+        const jugadores = [];
+        
+        for (const user of usersWithRoles) {
+            const assignment = adminAssignments[user.id] || { 
+                admin_id: 0, 
+                admin_nickname: 'AdminPrincipal', 
+                assigned_at: null 
+            };
+            const baseUserData = {
+                id: user.id, 
+                nickname: user.nickname, 
+                email: user.email,
+                first_name: user.first_name || '', 
+                last_name: '', 
+                assigned_admin_id: assignment.admin_id, 
+                assigned_admin_nickname: assignment.admin_nickname,
+                asignacion: assignment.assigned_at ? new Date(assignment.assigned_at).toLocaleDateString() : 'Administrador Principal',
+                luminarias_actuales: 0, luminarias_ganadas: 0, luminarias_gastadas: 0, luminarias_abonadas: 0, luminarias_compradas: 0
+            };
+            
+            try {
+                const userRolesResult = await pool.query(`
+                    SELECT r.name as role_name
+                    FROM user_roles ur
+                    JOIN roles r ON ur.role_id = r.id
+                    WHERE ur.user_id = $1
+                `, [user.id]);
+                
+                const userRoles = userRolesResult.rows.map(row => row.role_name);
+                
+                if (userRoles.includes('profesor')) {
+                    const profesorStats = await calculateStatsForRole(user.id, 'profesor');
+                    profesores.push({ 
+                        ...baseUserData, 
+                        role_name: 'profesor',
+                        blocks_created: profesorStats.blocks_created,
+                        total_questions: profesorStats.total_questions,
+                        total_topics: profesorStats.total_topics,
+                        estudiantes: profesorStats.total_users
+                    });
+                }
+                
+                if (userRoles.includes('creador')) {
+                    const creadorStats = await calculateStatsForRole(user.id, 'creador');
+                    creadores.push({ 
+                        ...baseUserData, 
+                        role_name: 'creador',
+                        blocks_created: creadorStats.blocks_created,
+                        total_questions: creadorStats.total_questions,
+                        total_topics: creadorStats.total_topics,
+                        usuarios: creadorStats.total_users
+                    });
+                }
+                
+                if (userRoles.includes('jugador')) {
+                    jugadores.push({ ...baseUserData, role_name: 'jugador' });
+                }
+                
+            } catch (e) {
+                console.warn(`Error getting roles for user ${user.id}:`, e.message);
+            }
+        }
+        
+        const profesoresCreadores = [...profesores, ...creadores];
+        
+        // Usuarios normales (excluyendo usuarios con roles específicos)
+        const rolesUserIds = new Set(usersWithRoles.map(user => user.id));
+        const usuarios = allUsers.rows
+            .filter(user => !rolesUserIds.has(user.id))
+            .map(user => {
+                const assignment = adminAssignments[user.id] || { 
+                    admin_id: 0, 
+                    admin_nickname: 'AdminPrincipal', 
+                    assigned_at: null 
+                };
+                const userData = allUsersWithStats.rows.find(u => u.id === user.id);
+                return {
+                    id: user.id, 
+                    nickname: user.nickname, 
+                    email: user.email,
+                    first_name: userData?.first_name || '', 
+                    last_name: '', 
+                    assigned_admin_id: assignment.admin_id, 
+                    assigned_admin_nickname: assignment.admin_nickname,
+                    asignacion: assignment.assigned_at ? new Date(assignment.assigned_at).toLocaleDateString() : 'Administrador Principal',
+                    blocks_loaded: 0,
+                    luminarias_actuales: 0, luminarias_ganadas: 0, luminarias_gastadas: 0, luminarias_abonadas: 0, luminarias_compradas: 0,
+                    role_name: 'usuario'
+                };
+            });
+
+        // Calcular estadísticas por rol
+        const roleCountsQuery = await pool.query(`
+            SELECT 
+                r.name as role_name,
+                COUNT(DISTINCT ur.user_id) as unique_count
+            FROM roles r
+            LEFT JOIN user_roles ur ON r.id = ur.role_id
+            GROUP BY r.name
+            ORDER BY r.name
+        `);
+        
+        let profesores_count = 0, creadores_count = 0, jugadores_count = 0, usuarios_count = 0;
+        
+        roleCountsQuery.rows.forEach(row => {
+            switch (row.role_name) {
+                case 'profesor': profesores_count += parseInt(row.unique_count); break;
+                case 'creador': creadores_count += parseInt(row.unique_count); break;
+                case 'jugador': jugadores_count += parseInt(row.unique_count); break;
+                case 'usuario': usuarios_count += parseInt(row.unique_count); break;
+            }
+        });
+
+        res.json({
+            // Mismo formato que PAP pero SIN adminSecundarios
+            profesoresCreadores,
+            profesores,
+            creadores,
+            jugadores,
+            usuarios,
+            availableAdmins: allUsers.rows,
+            admin_secundario_version: true,
+            statistics: {
+                profesores: profesores_count,
+                creadores: creadores_count,
+                jugadores: jugadores_count,
+                usuarios: usuarios_count
+            }
+        });
+
+    } catch (error) {
+        console.error('Error in admin secundario panel:', error);
         res.status(500).json({ error: 'Error interno del servidor', details: error.message });
     }
 });
