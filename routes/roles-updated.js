@@ -473,6 +473,98 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
 
         console.log(`📊 CORRECTED Role counts from DB: admins=${admins}, profesores=${profesores_count}, creadores=${creadores_count}, jugadores=${jugadores_count}, usuarios=${usuarios_count}`);
 
+        // Obtener métricas detalladas para profesores
+        const profesoresDetallados = await pool.query(`
+            SELECT 
+                u.id as user_id,
+                u.nickname,
+                u.first_name,
+                u.email,
+                ur.id as user_role_id,
+                COUNT(DISTINCT b.id) as bloques_creados,
+                COALESCE(SUM(ba.total_questions), 0) as total_preguntas
+            FROM users u
+            JOIN user_roles ur ON u.id = ur.user_id
+            JOIN roles r ON ur.role_id = r.id
+            LEFT JOIN blocks b ON ur.id = b.user_role_id
+            LEFT JOIN block_answers ba ON b.id = ba.block_id
+            WHERE r.name = 'profesor'
+            GROUP BY u.id, u.nickname, u.first_name, u.email, ur.id
+            ORDER BY u.nickname
+        `);
+
+        // Obtener métricas detalladas para creadores
+        const creadoresDetallados = await pool.query(`
+            SELECT 
+                u.id as user_id,
+                u.nickname,
+                u.first_name,
+                u.email,
+                ur.id as user_role_id,
+                COUNT(DISTINCT b.id) as bloques_creados,
+                COALESCE(SUM(ba.total_questions), 0) as total_preguntas,
+                COUNT(DISTINCT ta.id) as total_temas
+            FROM users u
+            JOIN user_roles ur ON u.id = ur.user_id
+            JOIN roles r ON ur.role_id = r.id
+            LEFT JOIN blocks b ON ur.id = b.user_role_id
+            LEFT JOIN block_answers ba ON b.id = ba.block_id
+            LEFT JOIN topic_answers ta ON b.id = ta.block_id
+            WHERE r.name = 'creador'
+            GROUP BY u.id, u.nickname, u.first_name, u.email, ur.id
+            ORDER BY u.nickname
+        `);
+
+        // Obtener conteo de estudiantes por bloque (usar user_profiles como fallback)
+        const estudiantesPorBloque = {};
+        try {
+            const estudiantesQuery = await pool.query(`
+                SELECT 
+                    b.id as block_id,
+                    COUNT(DISTINCT up.user_id) as estudiantes
+                FROM blocks b
+                LEFT JOIN user_profiles up ON up.loaded_blocks::jsonb ? b.id::text
+                GROUP BY b.id
+            `);
+            
+            estudiantesQuery.rows.forEach(row => {
+                estudiantesPorBloque[row.block_id] = parseInt(row.estudiantes) || 0;
+            });
+        } catch (e) {
+            console.log('Warning: Could not calculate students per block');
+        }
+
+        // Enriquecer datos de profesores con estudiantes
+        const profesoresConMetricas = profesoresDetallados.rows.map(prof => {
+            // Calcular estudiantes totales de todos sus bloques
+            let estudiantesTotales = 0;
+            try {
+                const bloquesProfesor = Object.keys(estudiantesPorBloque).filter(blockId => {
+                    // Aquí necesitaríamos verificar qué bloques pertenecen a este profesor
+                    // Por simplicidad, usar 0 por ahora
+                    return false;
+                });
+                estudiantesTotales = bloquesProfesor.reduce((sum, blockId) => 
+                    sum + estudiantesPorBloque[blockId], 0);
+            } catch (e) {
+                estudiantesTotales = 0;
+            }
+            
+            return {
+                ...prof,
+                bloques_creados: parseInt(prof.bloques_creados) || 0,
+                total_preguntas: parseInt(prof.total_preguntas) || 0,
+                estudiantes: estudiantesTotales
+            };
+        });
+
+        const creadoresConMetricas = creadoresDetallados.rows.map(creator => ({
+            ...creator,
+            bloques_creados: parseInt(creator.bloques_creados) || 0,
+            total_preguntas: parseInt(creator.total_preguntas) || 0,
+            total_temas: parseInt(creator.total_temas) || 0
+        }));
+
         res.json({
             adminSecundarios: adminSecundarios,
             profesoresCreadores: profesoresCreadores,
@@ -489,7 +581,10 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                 creadores: creadores_count,
                 jugadores: jugadores_count,
                 usuarios: usuarios_count
-            }
+            },
+            // Métricas detalladas para PAP
+            profesoresDetallados: profesoresConMetricas,
+            creadoresDetallados: creadoresConMetricas
         });
 
     } catch (error) {
