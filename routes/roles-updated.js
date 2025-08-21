@@ -324,10 +324,9 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
             if (adminIds.has(user.id)) continue; // Excluir administradores
             
             // Los no asignados corresponden al Administrador Principal
-            const adminPrincipal = adminSecundarios.find(admin => admin.role_name === 'administrador_principal');
             const assignment = adminAssignments[user.id] || { 
-                admin_id: adminPrincipal?.id || 0, 
-                admin_nickname: adminPrincipal?.nickname || 'AdminPrincipal', 
+                admin_id: null, 
+                admin_nickname: 'Administrador Principal', 
                 assigned_at: null 
             };
             const baseUserData = {
@@ -524,18 +523,19 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
 
         console.log(`📊 CORRECTED Role counts from DB: admins=${admins}, profesores=${profesores_count}, creadores=${creadores_count}, jugadores=${jugadores_count}, usuarios=${usuarios_count_real} (total users in table), bloques=${bloques_totales}, preguntas=${preguntas_totales}`);
 
-        // Separar jugadores en dos paneles: AdminPrincipal vs resto de administradores
-        const adminPrincipalId = adminSecundarios.find(admin => admin.role_name === 'administrador_principal')?.id;
-        
+        // Separar jugadores en dos paneles: AdminPrincipal (sin asignar) vs resto de administradores (asignados)
         const jugadoresAdminPrincipal = jugadores.filter(jugador => 
-            jugador.assigned_admin_id === adminPrincipalId || jugador.assigned_admin_id === 0 || jugador.assigned_admin_id === null
+            jugador.assigned_admin_id === null || jugador.assigned_admin_id === 0
         );
         const jugadoresOtrosAdmins = jugadores.filter(jugador => 
-            jugador.assigned_admin_id !== adminPrincipalId && 
-            jugador.assigned_admin_id !== 0 && 
-            jugador.assigned_admin_id !== null &&
-            !jugadoresAdminPrincipal.some(ap => ap.user_id === jugador.user_id)
+            jugador.assigned_admin_id !== null && jugador.assigned_admin_id !== 0
         );
+        
+        console.log('🎯 BACKEND DEBUG - Jugadores separados:');
+        console.log(`  - jugadoresAdminPrincipal: ${jugadoresAdminPrincipal.length} items`);
+        jugadoresAdminPrincipal.forEach(j => console.log(`    * ${j.nickname} (assigned_admin_id: ${j.assigned_admin_id})`));
+        console.log(`  - jugadoresOtrosAdmins: ${jugadoresOtrosAdmins.length} items`);
+        jugadoresOtrosAdmins.forEach(j => console.log(`    * ${j.nickname} (assigned_admin_id: ${j.assigned_admin_id})`));
 
         res.json({
             adminSecundarios: adminSecundarios,
