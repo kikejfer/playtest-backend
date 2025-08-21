@@ -783,7 +783,7 @@ router.get('/admin-secundario-panel', authenticateToken, async (req, res) => {
             FROM users u
             JOIN user_roles ur ON u.id = ur.user_id
             JOIN roles r ON ur.role_id = r.id
-            LEFT JOIN admin_assignments aa ON u.id = aa.user_id
+            LEFT JOIN admin_assignments aa ON u.id = aa.assigned_user_id
             WHERE r.name = 'profesor' AND (aa.admin_id = $1 OR aa.admin_id IS NULL)
         `, [currentAdminId]);
 
@@ -792,7 +792,7 @@ router.get('/admin-secundario-panel', authenticateToken, async (req, res) => {
             FROM users u
             JOIN user_roles ur ON u.id = ur.user_id
             JOIN roles r ON ur.role_id = r.id
-            LEFT JOIN admin_assignments aa ON u.id = aa.user_id
+            LEFT JOIN admin_assignments aa ON u.id = aa.assigned_user_id
             WHERE r.name = 'creador' AND (aa.admin_id = $1 OR aa.admin_id IS NULL)
         `, [currentAdminId]);
 
@@ -801,7 +801,7 @@ router.get('/admin-secundario-panel', authenticateToken, async (req, res) => {
             FROM users u
             JOIN user_roles ur ON u.id = ur.user_id
             JOIN roles r ON ur.role_id = r.id
-            LEFT JOIN admin_assignments aa ON u.id = aa.user_id
+            LEFT JOIN admin_assignments aa ON u.id = aa.assigned_user_id
             WHERE r.name = 'jugador' AND (aa.admin_id = $1 OR aa.admin_id IS NULL)
         `, [currentAdminId]);
         
@@ -816,7 +816,7 @@ router.get('/admin-secundario-panel', authenticateToken, async (req, res) => {
             FROM blocks b
             JOIN user_roles ur ON b.user_role_id = ur.id
             JOIN users u ON ur.user_id = u.id
-            LEFT JOIN admin_assignments aa ON u.id = aa.user_id
+            LEFT JOIN admin_assignments aa ON u.id = aa.assigned_user_id
             WHERE aa.admin_id = $1 OR aa.admin_id IS NULL
         `, [currentAdminId]);
 
@@ -826,7 +826,7 @@ router.get('/admin-secundario-panel', authenticateToken, async (req, res) => {
             JOIN blocks b ON ba.block_id = b.id
             JOIN user_roles ur ON b.user_role_id = ur.id
             JOIN users u ON ur.user_id = u.id
-            LEFT JOIN admin_assignments aa ON u.id = aa.user_id
+            LEFT JOIN admin_assignments aa ON u.id = aa.assigned_user_id
             WHERE aa.admin_id = $1 OR aa.admin_id IS NULL
         `, [currentAdminId]);
 
