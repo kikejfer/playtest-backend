@@ -89,8 +89,10 @@ class SupportAutomation {
         try {
             console.log('⚡ Procesando escalaciones automáticas...');
             
-            const result = await pool.query('SELECT process_automatic_escalations()');
-            const escalatedCount = result.rows[0].process_automatic_escalations;
+            // TEMPORARY: Function disabled until migration runs
+            // const result = await pool.query('SELECT process_automatic_escalations()');
+            // const escalatedCount = result.rows[0].process_automatic_escalations;
+            const escalatedCount = 0;
             
             if (escalatedCount > 0) {
                 console.log(`📈 ${escalatedCount} tickets escalados automáticamente`);
@@ -256,13 +258,13 @@ class SupportAutomation {
         try {
             console.log('🔒 Cerrando automáticamente tickets resueltos...');
             
-            // Obtener configuración de días para auto-cierre
-            const configResult = await pool.query(`
-                SELECT config_value FROM support_system_config 
-                WHERE config_key = 'auto_close_resolved_days'
-            `);
+            // TEMPORARY: Table disabled until migration runs
+            // const configResult = await pool.query(`
+            //     SELECT config_value FROM support_system_config 
+            //     WHERE config_key = 'auto_close_resolved_days'
+            // `);
             
-            const daysToClose = parseInt(configResult.rows[0]?.config_value || 7);
+            const daysToClose = 7; // Default value
             
             const result = await pool.query(`
                 UPDATE support_tickets 
@@ -397,16 +399,20 @@ class SupportAutomation {
     // Verificar alertas de SLA
     async checkSLAAlerts() {
         try {
-            // Obtener configuración de SLA
-            const slaConfigResult = await pool.query(`
-                SELECT config_key, config_value FROM support_system_config 
-                WHERE config_key IN ('sla_first_response_hours', 'sla_resolution_hours')
-            `);
+            // TEMPORARY: Table disabled until migration runs
+            // const slaConfigResult = await pool.query(`
+            //     SELECT config_key, config_value FROM support_system_config 
+            //     WHERE config_key IN ('sla_first_response_hours', 'sla_resolution_hours')
+            // `);
 
-            const slaConfig = {};
-            slaConfigResult.rows.forEach(row => {
-                slaConfig[row.config_key] = parseInt(row.config_value);
-            });
+            const slaConfig = {
+                sla_first_response_hours: 4,
+                sla_resolution_hours: 24
+            };
+            
+            // slaConfigResult.rows.forEach(row => {
+            //     slaConfig[row.config_key] = parseInt(row.config_value);
+            // });
 
             const firstResponseHours = slaConfig.sla_first_response_hours || 4;
             const resolutionHours = slaConfig.sla_resolution_hours || 24;
