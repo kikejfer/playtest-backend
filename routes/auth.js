@@ -64,6 +64,9 @@ router.post('/register', async (req, res) => {
     
     const userRoles = userRolesQuery.rows.map(row => row.role_name);
     
+    // DEBUG: Log roles for troubleshooting
+    console.log(`🔍 DEBUG JWT - Usuario ${user.nickname} (ID: ${user.id}) tiene roles:`, userRoles);
+    
     // Generate JWT token with roles
     const token = jwt.sign(
       { 
@@ -142,6 +145,9 @@ router.post('/login', async (req, res) => {
     `, [user.id]);
     
     const userRoles = userRolesQuery.rows.map(row => row.role_name);
+    
+    // DEBUG: Log roles for troubleshooting
+    console.log(`🔍 DEBUG JWT - Usuario ${user.nickname} (ID: ${user.id}) tiene roles:`, userRoles);
     
     // Generate JWT token with roles
     const token = jwt.sign(
