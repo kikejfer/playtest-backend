@@ -813,6 +813,28 @@ router.get('/admin-secundario-panel', authenticateToken, async (req, res) => {
             LEFT JOIN admin_assignments aa ON u.id = aa.assigned_user_id
             WHERE r.name = 'jugador' AND aa.admin_id = $1
         `, [currentAdminId]);
+
+        // Obtener jugadores asignados con datos detallados
+        const jugadoresAsignadosQuery = await pool.query(`
+            SELECT 
+                u.id as user_id,
+                u.nickname,
+                u.first_name,
+                u.email,
+                ur.id as user_role_id,
+                COUNT(DISTINCT ulb.block_id) as blocks_loaded,
+                COALESCE(u_admin.nickname, 'Administrador Principal') as assigned_admin_nickname,
+                aa.admin_id as assigned_admin_id
+            FROM users u
+            JOIN user_roles ur ON u.id = ur.user_id
+            JOIN roles r ON ur.role_id = r.id
+            LEFT JOIN admin_assignments aa ON u.id = aa.assigned_user_id
+            LEFT JOIN users u_admin ON aa.admin_id = u_admin.id
+            LEFT JOIN user_loaded_blocks ulb ON u.id = ulb.user_id
+            WHERE r.name = 'jugador' AND aa.admin_id = $1
+            GROUP BY u.id, u.nickname, u.first_name, u.email, ur.id, u_admin.nickname, aa.admin_id
+            ORDER BY u.nickname
+        `, [currentAdminId]);
         
         const profesores_count = parseInt(profesoresAssignedQuery.rows[0]?.count) || 0;
         const creadores_count = parseInt(creadoresAssignedQuery.rows[0]?.count) || 0;
@@ -894,12 +916,18 @@ router.get('/admin-secundario-panel', authenticateToken, async (req, res) => {
             ORDER BY u.nickname
         `, [currentAdminId]);
 
+        console.log('📊 PAS Data Summary for Admin', currentAdminId, ':', {
+            profesores: profesoresAsignadosQuery.rows.length,
+            creadores: creadoresAsignadosQuery.rows.length,
+            jugadores: jugadoresAsignadosQuery.rows.length
+        });
+
         res.json({
             // Datos específicos para PAS con estadísticas detalladas
             profesores: profesoresAsignadosQuery.rows,
             creadores: creadoresAsignadosQuery.rows,
-            jugadores,
-            usuarios,
+            jugadores: jugadoresAsignadosQuery.rows,
+            usuarios: [], // PAS no maneja usuarios genéricos
             availableAdmins: allUsers.rows,
             admin_secundario_version: true,
             statistics: {
