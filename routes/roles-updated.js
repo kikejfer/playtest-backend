@@ -321,7 +321,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
         
         // Procesar TODOS los usuarios con roles según TODOS sus roles
         for (const user of usersWithRoles) {
-            if (adminIds.has(user.id)) continue; // Excluir administradores
+            const isAdmin = adminIds.has(user.id);
             
             // Los no asignados corresponden al Administrador Principal
             const assignment = adminAssignments[user.id] || { 
@@ -355,7 +355,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                 `, [user.id]);
                 
                 const userRoles = userRolesResult.rows.map(row => row.role_name);
-                console.log(`👤 User ${user.nickname} (ID: ${user.id}) has roles:`, userRoles);
+                console.log(`👤 User ${user.nickname} (ID: ${user.id}) has roles:`, userRoles, isAdmin ? '(ADMIN)' : '');
                 
                 // Agregar a las listas correspondientes según roles con estadísticas correctas
                 if (userRoles.includes('profesor')) {
@@ -383,6 +383,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                 }
                 
                 if (userRoles.includes('jugador') || userRoles.some(role => role.includes('jugador'))) {
+                    console.log(`🎮 Adding ${user.nickname} to jugadores list (isAdmin: ${isAdmin})`);
                     // Calcular bloques cargados para jugadores desde user_loaded_blocks
                     try {
                         const bloquesQuery = await pool.query(`
