@@ -54,9 +54,23 @@ router.post('/register', async (req, res) => {
       [user.id]
     );
 
-    // Generate JWT token
+    // Get user roles before generating token
+    const userRolesQuery = await pool.query(`
+      SELECT r.name as role_name
+      FROM user_roles ur
+      JOIN roles r ON ur.role_id = r.id
+      WHERE ur.user_id = $1
+    `, [user.id]);
+    
+    const userRoles = userRolesQuery.rows.map(row => row.role_name);
+    
+    // Generate JWT token with roles
     const token = jwt.sign(
-      { userId: user.id, nickname: user.nickname },
+      { 
+        userId: user.id, 
+        nickname: user.nickname,
+        roles: userRoles
+      },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -119,9 +133,23 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // Generate JWT token
+    // Get user roles before generating token
+    const userRolesQuery = await pool.query(`
+      SELECT r.name as role_name
+      FROM user_roles ur
+      JOIN roles r ON ur.role_id = r.id
+      WHERE ur.user_id = $1
+    `, [user.id]);
+    
+    const userRoles = userRolesQuery.rows.map(row => row.role_name);
+    
+    // Generate JWT token with roles
     const token = jwt.sign(
-      { userId: user.id, nickname: user.nickname },
+      { 
+        userId: user.id, 
+        nickname: user.nickname,
+        roles: userRoles
+      },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
