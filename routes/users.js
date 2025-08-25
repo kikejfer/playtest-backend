@@ -7,6 +7,13 @@ const router = express.Router();
 // Get user profile
 router.get('/profile', authenticateToken, async (req, res) => {
   try {
+    // DEBUG: Log incoming request data
+    console.log('🔍 DEBUG /profile endpoint - req.user:', {
+      id: req.user.id,
+      nickname: req.user.nickname,
+      roles: req.user.roles
+    });
+
     const result = await pool.query(`
       SELECT u.id, u.nickname, u.email, u.first_name, u.last_name, u.created_at,
         up.answer_history, up.stats, up.preferences, up.loaded_blocks
@@ -15,12 +22,29 @@ router.get('/profile', authenticateToken, async (req, res) => {
       WHERE u.id = $1
     `, [req.user.id]);
 
+    // DEBUG: Log SQL query result
+    console.log('🔍 DEBUG SQL Query result:', {
+      rowCount: result.rows.length,
+      rawData: result.rows[0]
+    });
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
 
     const user = result.rows[0];
-    res.json({
+    
+    // DEBUG: Log the specific fields we're returning
+    console.log('🔍 DEBUG Profile response data:', {
+      id: user.id,
+      nickname: user.nickname,
+      first_name_raw: user.first_name,
+      last_name_raw: user.last_name,
+      first_name_mapped: user.first_name,
+      last_name_mapped: user.last_name
+    });
+
+    const response = {
       id: user.id,
       nickname: user.nickname,
       email: user.email,
@@ -31,7 +55,12 @@ router.get('/profile', authenticateToken, async (req, res) => {
       stats: user.stats || {},
       preferences: user.preferences || {},
       loadedBlocks: user.loaded_blocks || []
-    });
+    };
+
+    // DEBUG: Log final response
+    console.log('🔍 DEBUG Final response:', response);
+    
+    res.json(response);
 
   } catch (error) {
     console.error('Error fetching user profile:', error);
