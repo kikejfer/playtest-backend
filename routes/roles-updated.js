@@ -523,12 +523,21 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
 
         console.log(`📊 CORRECTED Role counts from DB: admins=${admins}, profesores=${profesores_count}, creadores=${creadores_count}, jugadores=${jugadores_count}, usuarios=${usuarios_count_real} (total users in table), bloques=${bloques_totales}, preguntas=${preguntas_totales}`);
 
-        // Separar jugadores en dos paneles: AdminPrincipal (sin asignar) vs resto de administradores (asignados)
+        // Separar jugadores en dos paneles: AdminPrincipal vs resto de administradores
+        const adminPrincipal = adminSecundarios.find(admin => admin.role_name === 'administrador_principal');
+        const adminPrincipalId = adminPrincipal?.id || 0;
+        
         const jugadoresAdminPrincipal = jugadores.filter(jugador => 
-            jugador.assigned_admin_id === null || jugador.assigned_admin_id === 0
+            jugador.assigned_admin_id === null || 
+            jugador.assigned_admin_id === 0 || 
+            jugador.assigned_admin_id === adminPrincipalId ||
+            jugador.assigned_admin_nickname === 'AdminPrincipal'
         );
         const jugadoresOtrosAdmins = jugadores.filter(jugador => 
-            jugador.assigned_admin_id !== null && jugador.assigned_admin_id !== 0
+            jugador.assigned_admin_id !== null && 
+            jugador.assigned_admin_id !== 0 && 
+            jugador.assigned_admin_id !== adminPrincipalId &&
+            jugador.assigned_admin_nickname !== 'AdminPrincipal'
         );
         
         console.log('🎯 BACKEND DEBUG - Jugadores separados:');
