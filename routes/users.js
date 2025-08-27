@@ -435,29 +435,44 @@ router.put('/update-roles', authenticateToken, async (req, res) => {
     try {
       await client.query('BEGIN');
 
-      // Check if user is trying to modify admin roles
+      // Get current user roles for security checks
+      const currentRoles = await client.query(`
+        SELECT r.name
+        FROM user_roles ur
+        JOIN roles r ON ur.role_id = r.id
+        WHERE ur.user_id = $1
+      `, [req.user.id]);
+
+      const currentRoleNames = currentRoles.rows.map(r => r.name);
+      const isAdminPrincipal = currentRoleNames.some(role => 
+        role.includes('administrador_principal')
+      );
+      const isAdminSecundario = currentRoleNames.some(role => 
+        role.includes('administrador_secundario')
+      );
+
+      // Check if user is trying to add admin roles
       const hasAdminRoles = roles.some(role => 
         role.includes('administrador') || role.includes('admin')
       );
 
-      if (hasAdminRoles) {
-        // Verify current user has admin permissions
-        const currentRoles = await client.query(`
-          SELECT r.name
-          FROM user_roles ur
-          JOIN roles r ON ur.role_id = r.id
-          WHERE ur.user_id = $1
-        `, [req.user.id]);
+      if (hasAdminRoles && !isAdminPrincipal) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ 
+          error: 'Only principal administrators can assign admin roles' 
+        });
+      }
 
-        const currentRoleNames = currentRoles.rows.map(r => r.name);
-        const isAdmin = currentRoleNames.some(role => 
-          role.includes('administrador_principal') || role.includes('admin')
+      // Prevent admin secundario from removing their own admin role
+      if (isAdminSecundario && !isAdminPrincipal) {
+        const stillHasAdminRole = roles.some(role => 
+          role.includes('administrador_secundario')
         );
-
-        if (!isAdmin) {
+        
+        if (!stillHasAdminRole) {
           await client.query('ROLLBACK');
           return res.status(403).json({ 
-            error: 'Only administrators can assign admin roles' 
+            error: 'Secondary administrators cannot remove their own admin role. Only principal administrators can modify admin roles.' 
           });
         }
       }
