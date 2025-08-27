@@ -451,15 +451,16 @@ router.put('/update-roles', authenticateToken, async (req, res) => {
         role.includes('administrador_secundario')
       );
 
-      // Check if user is trying to add admin roles
-      const hasAdminRoles = roles.some(role => 
-        role.includes('administrador') || role.includes('admin')
+      // Check if user is trying to add NEW admin roles they don't already have
+      const newAdminRoles = roles.filter(role => 
+        (role.includes('administrador') || role.includes('admin')) &&
+        !currentRoleNames.includes(role)
       );
 
-      if (hasAdminRoles && !isAdminPrincipal) {
+      if (newAdminRoles.length > 0 && !isAdminPrincipal) {
         await client.query('ROLLBACK');
         return res.status(403).json({ 
-          error: 'Only principal administrators can assign admin roles' 
+          error: `Only principal administrators can assign new admin roles: ${newAdminRoles.join(', ')}` 
         });
       }
 
