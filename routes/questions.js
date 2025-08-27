@@ -63,6 +63,31 @@ router.post('/', authenticateToken, async (req, res) => {
       );
     }
 
+    // Update statistics tables: block_answers and topic_answers
+    console.log('📊 Updating statistics tables...');
+    
+    // Update or insert block_answers (total questions per block)
+    await client.query(`
+      INSERT INTO block_answers (block_id, total_questions) 
+      VALUES ($1, 1) 
+      ON CONFLICT (block_id) 
+      DO UPDATE SET 
+        total_questions = block_answers.total_questions + 1,
+        updated_at = CURRENT_TIMESTAMP
+    `, [blockId]);
+
+    // Update or insert topic_answers (total questions per topic in block)
+    await client.query(`
+      INSERT INTO topic_answers (block_id, topic, total_questions) 
+      VALUES ($1, $2, 1) 
+      ON CONFLICT (block_id, topic) 
+      DO UPDATE SET 
+        total_questions = topic_answers.total_questions + 1,
+        updated_at = CURRENT_TIMESTAMP
+    `, [blockId, tema]);
+
+    console.log(`✅ Statistics updated - Block ${blockId}, Topic: ${tema}`);
+
     await client.query('COMMIT');
 
     res.status(201).json({
