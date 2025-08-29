@@ -1135,6 +1135,79 @@ router.post('/add-admin-secundario', authenticateToken, async (req, res) => {
     }
 });
 
+// Remover rol específico de usuario
+router.post('/remove-role', authenticateToken, async (req, res) => {
+    try {
+        const { userId, roleToRemove } = req.body;
+        console.log(`🔧 REQUEST: remove-role - userId: ${userId}, roleToRemove: ${roleToRemove}`);
+        
+        if (!userId || !roleToRemove) {
+            console.log(`❌ VALIDATION: Missing userId or roleToRemove`);
+            return res.status(400).json({ error: 'userId y roleToRemove son requeridos' });
+        }
+        
+        // Verificar que el usuario existe
+        const userCheck = await pool.query('SELECT id, nickname, email FROM users WHERE id = $1', [userId]);
+        
+        if (userCheck.rows.length === 0) {
+            console.log(`❌ USER NOT FOUND: ${userId}`);
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+        
+        const user = userCheck.rows[0];
+        console.log(`🔍 USER FOUND: ${user.nickname} (${user.id})`);
+        
+        // Buscar el rol que se quiere remover
+        const roleResult = await pool.query('SELECT id FROM roles WHERE name = $1', [roleToRemove]);
+        
+        if (roleResult.rows.length === 0) {
+            console.log(`❌ ROLE NOT FOUND: ${roleToRemove}`);
+            return res.status(404).json({ error: `Rol '${roleToRemove}' no encontrado` });
+        }
+        
+        const roleId = roleResult.rows[0].id;
+        
+        // Verificar que el usuario tiene ese rol
+        const userRoleCheck = await pool.query(`
+            SELECT id FROM user_roles 
+            WHERE user_id = $1 AND role_id = $2
+        `, [user.id, roleId]);
+        
+        if (userRoleCheck.rows.length === 0) {
+            console.log(`❌ USER ROLE NOT FOUND: User ${user.id} doesn't have role ${roleToRemove}`);
+            return res.status(404).json({ 
+                error: `El usuario ${user.nickname} no tiene el rol '${roleToRemove}'` 
+            });
+        }
+        
+        // Remover el rol del usuario
+        await pool.query(`
+            DELETE FROM user_roles 
+            WHERE user_id = $1 AND role_id = $2
+        `, [user.id, roleId]);
+        
+        console.log(`✅ SUCCESS: Removed role '${roleToRemove}' from user ${user.id} (${user.nickname})`);
+        
+        res.json({
+            success: true,
+            message: `Rol '${roleToRemove}' removido del usuario ${user.nickname}`,
+            user: {
+                id: user.id,
+                nickname: user.nickname,
+                email: user.email,
+                removedRole: roleToRemove
+            }
+        });
+        
+    } catch (error) {
+        console.error('Error removing role:', error);
+        res.status(500).json({ 
+            error: 'Error removiendo rol',
+            details: error.message 
+        });
+    }
+});
+
 // Buscar usuarios
 router.get('/search-users', authenticateToken, async (req, res) => {
     try {
