@@ -576,4 +576,87 @@ router.put('/change-password', authenticateToken, async (req, res) => {
   }
 });
 
+// Update user roles - endpoint for role-selection.html
+router.put('/me/roles', authenticateToken, async (req, res) => {
+  try {
+    const { roles } = req.body;
+
+    if (!Array.isArray(roles)) {
+      return res.status(400).json({ error: 'Roles must be an array' });
+    }
+
+    console.log(`🎭 Updating roles for user ${req.user.id}:`, roles);
+
+    // Start transaction
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Remove all current roles for this user
+      await client.query('DELETE FROM user_roles WHERE user_id = $1', [req.user.id]);
+
+      // Add new roles
+      if (roles.length > 0) {
+        // First, get all valid role IDs
+        const validRoles = await client.query(`
+          SELECT id, name FROM roles WHERE name = ANY($1)
+        `, [roles]);
+
+        if (validRoles.rows.length !== roles.length) {
+          const validRoleNames = validRoles.rows.map(r => r.name);
+          const invalidRoles = roles.filter(r => !validRoleNames.includes(r));
+          await client.query('ROLLBACK');
+          return res.status(400).json({ 
+            error: `Invalid roles: ${invalidRoles.join(', ')}` 
+          });
+        }
+
+        // Insert new role assignments
+        for (const roleRow of validRoles.rows) {
+          await client.query(`
+            INSERT INTO user_roles (user_id, role_id) 
+            VALUES ($1, $2)
+          `, [req.user.id, roleRow.id]);
+        }
+
+        console.log(`✅ User ${req.user.id} roles updated to:`, roles);
+      } else {
+        console.log(`✅ User ${req.user.id} roles cleared (no roles assigned)`);
+      }
+
+      await client.query('COMMIT');
+
+      // Generate new JWT token with updated roles
+      const jwt = require('jsonwebtoken');
+      const newToken = jwt.sign(
+        { 
+          id: req.user.id, 
+          nickname: req.user.nickname,
+          roles: roles 
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+      
+      console.log('✅ Generated new token with roles:', roles);
+      
+      res.json({ 
+        message: 'Roles updated successfully', 
+        roles: roles,
+        token: newToken // Send updated token back to frontend
+      });
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+
+  } catch (error) {
+    console.error('Error updating user roles:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 module.exports = router;

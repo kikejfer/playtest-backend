@@ -62,7 +62,22 @@ router.post('/register', async (req, res) => {
       WHERE ur.user_id = $1
     `, [user.id]);
     
-    const userRoles = userRolesQuery.rows.map(row => row.role_name);
+    let userRoles = userRolesQuery.rows.map(row => row.role_name);
+    
+    // Handle role name normalization for compatibility
+    userRoles = userRoles.map(role => {
+      // Normalize role names to match expected format
+      if (role === 'admin_secundario' || role === 'administrador_secundario') {
+        return 'administrador_secundario';
+      }
+      if (role === 'admin_principal' || role === 'administrador_principal') {
+        return 'administrador_principal';
+      }
+      if (role === 'creador_contenido' || role === 'profesor_creador') {
+        return 'creador';
+      }
+      return role;
+    });
     
     // DEBUG: Log roles for troubleshooting
     console.log(`🔍 DEBUG JWT - Usuario ${user.nickname} (ID: ${user.id}) tiene roles:`, userRoles);
@@ -144,7 +159,22 @@ router.post('/login', async (req, res) => {
       WHERE ur.user_id = $1
     `, [user.id]);
     
-    const userRoles = userRolesQuery.rows.map(row => row.role_name);
+    let userRoles = userRolesQuery.rows.map(row => row.role_name);
+    
+    // Handle role name normalization for compatibility
+    userRoles = userRoles.map(role => {
+      // Normalize role names to match expected format
+      if (role === 'admin_secundario' || role === 'administrador_secundario') {
+        return 'administrador_secundario';
+      }
+      if (role === 'admin_principal' || role === 'administrador_principal') {
+        return 'administrador_principal';
+      }
+      if (role === 'creador_contenido' || role === 'profesor_creador') {
+        return 'creador';
+      }
+      return role;
+    });
     
     // DEBUG: Log roles for troubleshooting
     console.log(`🔍 DEBUG JWT - Usuario ${user.nickname} (ID: ${user.id}) tiene roles:`, userRoles);
