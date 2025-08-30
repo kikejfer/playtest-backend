@@ -483,23 +483,21 @@ router.post('/', authenticateToken, async (req, res) => {
 
     console.log('🔧 Creating block:', { name, description, observaciones, isPublic, userId: req.user.id });
 
-    // Get user's active user_role record for block creation
+    // Get user's current active user_role record for block creation
     let userRoleRecordId = null;
     try {
+      const currentRole = req.headers['x-current-role'];
+      if (!currentRole) {
+        return res.status(400).json({ error: 'Current role header is required' });
+      }
+
       const userRoleResult = await pool.query(`
         SELECT ur.id, r.name as role_name
         FROM user_roles ur 
         JOIN roles r ON ur.role_id = r.id 
-        WHERE ur.user_id = $1 
-        ORDER BY CASE 
-          WHEN r.name = 'administrador_principal' THEN 1
-          WHEN r.name = 'administrador_secundario' THEN 2
-          WHEN r.name = 'creador' OR r.name = 'creador_contenido' THEN 3
-          WHEN r.name = 'profesor' THEN 4
-          ELSE 5 
-        END
+        WHERE ur.user_id = $1 AND r.name = $2
         LIMIT 1
-      `, [req.user.id]);
+      `, [req.user.id, currentRole]);
       
       if (userRoleResult.rows.length > 0) {
         userRoleRecordId = userRoleResult.rows[0].id;
