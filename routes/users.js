@@ -71,7 +71,11 @@ router.get('/profile', authenticateToken, async (req, res) => {
 // Update user profile
 router.put('/profile', authenticateToken, async (req, res) => {
   try {
-    const { email, firstName, lastName, preferences } = req.body;
+    const { email, firstName, lastName, first_name, last_name, preferences } = req.body;
+    
+    // Support both camelCase and snake_case field names
+    const finalFirstName = firstName || first_name;
+    const finalLastName = lastName || last_name;
 
     // Update user basic info
     const updateFields = [];
@@ -82,13 +86,13 @@ router.put('/profile', authenticateToken, async (req, res) => {
       updateFields.push(`email = $${paramIndex++}`);
       updateValues.push(email);
     }
-    if (firstName !== undefined) {
+    if (finalFirstName !== undefined) {
       updateFields.push(`first_name = $${paramIndex++}`);
-      updateValues.push(firstName);
+      updateValues.push(finalFirstName);
     }
-    if (lastName !== undefined) {
+    if (finalLastName !== undefined) {
       updateFields.push(`last_name = $${paramIndex++}`);
-      updateValues.push(lastName);
+      updateValues.push(finalLastName);
     }
 
     if (updateFields.length > 0) {
