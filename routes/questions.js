@@ -35,7 +35,7 @@ router.post('/', authenticateToken, async (req, res) => {
 
     // Check if user owns the block
     const blockCheck = await client.query(
-      'SELECT creator_id FROM blocks WHERE id = $1',
+      'SELECT user_id FROM blocks WHERE id = $1',
       [blockId]
     );
 
@@ -43,7 +43,7 @@ router.post('/', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Block not found' });
     }
 
-    if (blockCheck.rows[0].creator_id !== req.user.id) {
+    if (blockCheck.rows[0].user_id !== req.user.id) {
       return res.status(403).json({ error: 'Not authorized to add questions to this block' });
     }
 

@@ -524,10 +524,10 @@ router.post('/', authenticateToken, async (req, res) => {
       imageUrl = imageSearch.getRandomFallbackImage();
     }
 
-    // Create the block with image, observations, and user_role_id
+    // Create the block with image, observations, user_id, and user_role_id
     const result = await pool.query(
-      'INSERT INTO blocks (name, description, observaciones, user_role_id, is_public, image_url) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-      [name, description, observaciones, userRoleRecordId, isPublic, imageUrl]
+      'INSERT INTO blocks (name, description, observaciones, user_id, user_role_id, is_public, image_url) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+      [name, description, observaciones, req.user.id, userRoleRecordId, isPublic, imageUrl]
     );
 
     const newBlock = result.rows[0];
