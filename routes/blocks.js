@@ -491,13 +491,25 @@ router.post('/', authenticateToken, async (req, res) => {
         return res.status(400).json({ error: 'Current role header is required' });
       }
 
+      // Map panel codes to role names
+      const roleMapping = {
+        'PAP': 'administrador_principal',
+        'PAS': 'administrador_secundario', 
+        'PPF': 'profesor',
+        'PCC': 'creador',
+        'PJU': 'jugador'
+      };
+      
+      const actualRoleName = roleMapping[currentRole] || currentRole;
+      console.log('🎭 Role mapping:', currentRole, '→', actualRoleName);
+
       const userRoleResult = await pool.query(`
         SELECT ur.id, r.name as role_name
         FROM user_roles ur 
         JOIN roles r ON ur.role_id = r.id 
         WHERE ur.user_id = $1 AND r.name = $2
         LIMIT 1
-      `, [req.user.id, currentRole]);
+      `, [req.user.id, actualRoleName]);
       
       if (userRoleResult.rows.length > 0) {
         userRoleRecordId = userRoleResult.rows[0].id;
