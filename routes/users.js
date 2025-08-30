@@ -44,13 +44,21 @@ router.get('/profile', authenticateToken, async (req, res) => {
       last_name_mapped: user.last_name
     });
 
+    // Get user roles from JWT token
+    const userRoles = req.user.roles || [];
+    
     const response = {
       id: user.id,
       nickname: user.nickname,
       email: user.email,
+      // Support both camelCase and snake_case for compatibility
       firstName: user.first_name,
       lastName: user.last_name,
+      first_name: user.first_name,
+      last_name: user.last_name,
       createdAt: user.created_at,
+      created_at: user.created_at,
+      roles: userRoles,
       answerHistory: user.answer_history || [],
       stats: user.stats || {},
       preferences: user.preferences || {},
