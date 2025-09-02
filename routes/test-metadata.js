@@ -11,7 +11,7 @@ router.get('/', async (req, res) => {
     const results = {};
     
     try {
-      const typesResult = await pool.query('SELECT id, name, description FROM block_types ORDER BY id');
+      const typesResult = await pool.query('SELECT id, name FROM block_types ORDER BY id');
       results.types = {
         exists: true,
         count: typesResult.rows.length,
@@ -22,7 +22,7 @@ router.get('/', async (req, res) => {
     }
     
     try {
-      const levelsResult = await pool.query('SELECT id, name, description FROM block_levels ORDER BY id'); 
+      const levelsResult = await pool.query('SELECT id, name FROM block_levels ORDER BY id'); 
       results.levels = {
         exists: true,
         count: levelsResult.rows.length,
@@ -33,7 +33,7 @@ router.get('/', async (req, res) => {
     }
     
     try {
-      const statesResult = await pool.query('SELECT id, name, description FROM block_states ORDER BY id');
+      const statesResult = await pool.query('SELECT id, name FROM block_states ORDER BY id');
       results.states = {
         exists: true,
         count: statesResult.rows.length, 

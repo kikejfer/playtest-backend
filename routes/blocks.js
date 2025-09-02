@@ -1333,7 +1333,7 @@ router.get('/types', async (req, res) => {
     console.log('🔍 /blocks/types endpoint called');
     
     const result = await pool.query(`
-      SELECT id, name, description 
+      SELECT id, name 
       FROM block_types 
       ORDER BY name ASC
     `);
@@ -1357,7 +1357,7 @@ router.get('/levels', async (req, res) => {
     console.log('🔍 /blocks/levels endpoint called');
     
     const result = await pool.query(`
-      SELECT id, name, description 
+      SELECT id, name 
       FROM block_levels 
       ORDER BY name ASC
     `);
@@ -1381,7 +1381,7 @@ router.get('/states', async (req, res) => {
     console.log('🔍 /blocks/states endpoint called');
     
     const result = await pool.query(`
-      SELECT id, name, description 
+      SELECT id, name 
       FROM block_states 
       ORDER BY name ASC
     `);
@@ -1405,9 +1405,9 @@ router.get('/metadata', async (req, res) => {
     console.log('🔍 /blocks/metadata endpoint called');
     
     const [typesResult, levelsResult, statesResult] = await Promise.all([
-      pool.query('SELECT id, name, description FROM block_types ORDER BY name ASC'),
-      pool.query('SELECT id, name, description FROM block_levels ORDER BY name ASC'), 
-      pool.query('SELECT id, name, description FROM block_states ORDER BY name ASC')
+      pool.query('SELECT id, name FROM block_types ORDER BY name ASC'),
+      pool.query('SELECT id, name FROM block_levels ORDER BY name ASC'), 
+      pool.query('SELECT id, name FROM block_states ORDER BY name ASC')
     ]);
 
     const metadata = {
