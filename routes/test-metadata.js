@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const pool = require('../config/database');
+const pool = require('../database/connection');
 
 // Test endpoint to verify metadata tables and data
 router.get('/', async (req, res) => {
