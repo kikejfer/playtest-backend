@@ -93,6 +93,7 @@ const featureFlagsRoutes = require('./routes/feature-flags');
 const userPreferencesRoutes = require('./routes/user-preferences');
 const gameStatesRoutes = require('./routes/game-states');
 const creatorsPanelRoutes = require('./routes/creators-panel');
+const testMetadataRoutes = require('./routes/test-metadata');
 
 // Use routes
 app.use('/api/auth', authRoutes);
@@ -111,6 +112,7 @@ app.use('/api/feature-flags', featureFlagsRoutes);
 app.use('/api/user-preferences', userPreferencesRoutes);
 app.use('/api/game-states', gameStatesRoutes);
 app.use('/api/creators-panel', creatorsPanelRoutes);
+app.use('/api/test-metadata', testMetadataRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {

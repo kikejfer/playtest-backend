@@ -534,10 +534,15 @@ router.post('/', authenticateToken, async (req, res) => {
       imageUrl = imageSearch.getRandomFallbackImage();
     }
 
-    // Create the block with image, observations, user_id, and user_role_id
+    // Extract block metadata from request
+    const tipoId = req.body.tipo_id || req.body.tipoId || null;
+    const nivelId = req.body.nivel_id || req.body.nivelId || null;  
+    const estadoId = req.body.estado_id || req.body.estadoId || null;
+
+    // Create the block with image, observations, user_id, user_role_id and metadata
     const result = await pool.query(
-      'INSERT INTO blocks (name, description, observaciones, user_id, user_role_id, is_public, image_url) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
-      [name, description, observaciones, req.user.id, userRoleRecordId, isPublic, imageUrl]
+      'INSERT INTO blocks (name, description, observaciones, user_id, user_role_id, is_public, image_url, tipo_id, nivel_id, estado_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
+      [name, description, observaciones, req.user.id, userRoleRecordId, isPublic, imageUrl, tipoId, nivelId, estadoId]
     );
 
     const newBlock = result.rows[0];
@@ -1180,6 +1185,247 @@ router.get('/:id/complete', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error fetching complete block info:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// Get created blocks with statistics for Bloques Creados section
+router.get('/created-stats', authenticateToken, async (req, res) => {
+  try {
+    console.log('🔍 /blocks/created-stats endpoint called');
+    console.log('🔍 User ID:', req.user.id);
+    console.log('🔍 Headers:', req.headers);
+
+    // Get the current active role from header
+    const currentRole = req.headers['x-current-role'];
+    if (!currentRole) {
+      return res.status(400).json({ error: 'Current role header is required' });
+    }
+
+    // Map panel codes to role names
+    const roleMapping = {
+      'PAP': 'administrador_principal',
+      'PAS': 'administrador_secundario', 
+      'PPF': 'profesor',
+      'PCC': 'creador',
+      'PJU': 'jugador'
+    };
+    
+    const actualRoleName = roleMapping[currentRole] || currentRole;
+    console.log('🎭 Role mapping:', currentRole, '→', actualRoleName);
+
+    // Get user's specific user_role record for the current active role
+    const userRoleResult = await pool.query(`
+      SELECT ur.id as user_role_id, r.name as role_name
+      FROM user_roles ur 
+      JOIN roles r ON ur.role_id = r.id 
+      WHERE ur.user_id = $1 AND r.name = $2
+      LIMIT 1
+    `, [req.user.id, actualRoleName]);
+    
+    if (userRoleResult.rows.length === 0) {
+      return res.status(403).json({ error: 'User does not have the specified role' });
+    }
+
+    const userRoleId = userRoleResult.rows[0].user_role_id;
+    console.log('👤 User role ID for query:', userRoleId, 'Role:', userRoleResult.rows[0].role_name);
+    
+    // Get blocks created by this user with this specific role, along with statistics and metadata
+    const blocksResult = await pool.query(`
+      SELECT 
+        b.id,
+        b.name,
+        b.description,
+        b.observaciones,
+        b.is_public,
+        b.created_at,
+        b.updated_at,
+        b.image_url,
+        u.nickname as creator_nickname,
+        r.name as created_with_role,
+        
+        -- Metadata fields
+        bt.name as tipo_name,
+        bl.name as nivel_name,
+        bs.name as estado_name,
+        
+        -- Number of questions from block_answers table
+        COALESCE(ba.total_questions, 0) as total_questions,
+        
+        -- Number of topics from topic_answers table  
+        COALESCE(ta.topic_count, 0) as total_topics,
+        
+        -- Number of users who have loaded this block (from user_profiles.loaded_blocks JSONB)
+        COALESCE(ub.user_count, 0) as total_users
+        
+      FROM blocks b
+      LEFT JOIN user_roles ur ON b.user_role_id = ur.id
+      LEFT JOIN users u ON ur.user_id = u.id
+      LEFT JOIN roles r ON ur.role_id = r.id
+      LEFT JOIN block_types bt ON b.tipo_id = bt.id
+      LEFT JOIN block_levels bl ON b.nivel_id = bl.id
+      LEFT JOIN block_states bs ON b.estado_id = bs.id
+      LEFT JOIN block_answers ba ON b.id = ba.block_id
+      LEFT JOIN (
+        SELECT block_id, COUNT(DISTINCT topic) as topic_count
+        FROM topic_answers 
+        GROUP BY block_id
+      ) ta ON b.id = ta.block_id
+      LEFT JOIN (
+        SELECT 
+          jsonb_array_elements_text(loaded_blocks)::integer as block_id,
+          COUNT(*) as user_count
+        FROM user_profiles 
+        WHERE loaded_blocks IS NOT NULL AND loaded_blocks != '[]'::jsonb
+        GROUP BY jsonb_array_elements_text(loaded_blocks)::integer
+      ) ub ON b.id = ub.block_id
+      WHERE b.user_role_id = $1
+      ORDER BY b.created_at DESC
+    `, [userRoleId]);
+
+    console.log('🔍 Found blocks with stats:', blocksResult.rows.length);
+
+    // Transform the results to match the expected format
+    const blocks = blocksResult.rows.map(block => ({
+      id: block.id,
+      name: block.name,
+      description: block.description,
+      observaciones: block.observaciones,
+      isPublic: block.is_public,
+      createdAt: block.created_at,
+      updatedAt: block.updated_at,
+      imageUrl: block.image_url,
+      creatorNickname: block.creator_nickname,
+      createdWithRole: block.created_with_role,
+      
+      // Metadata
+      metadata: {
+        tipo: block.tipo_name || 'Sin especificar',
+        nivel: block.nivel_name || 'Sin especificar', 
+        estado: block.estado_name || 'Sin especificar'
+      },
+      
+      // Statistics
+      stats: {
+        totalQuestions: parseInt(block.total_questions) || 0,
+        totalTopics: parseInt(block.total_topics) || 0,
+        totalUsers: parseInt(block.total_users) || 0
+      }
+    }));
+
+    console.log('✅ Returning blocks with stats:', blocks.length);
+    res.json(blocks);
+    
+  } catch (error) {
+    console.error('❌ Error fetching created blocks with stats:', error);
+    console.error('❌ Error details:', error.message);
+    console.error('❌ Error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message,
+      endpoint: '/blocks/created-stats'
+    });
+  }
+});
+
+// Get block types for dropdowns
+router.get('/types', async (req, res) => {
+  try {
+    console.log('🔍 /blocks/types endpoint called');
+    
+    const result = await pool.query(`
+      SELECT id, name, description 
+      FROM block_types 
+      ORDER BY name ASC
+    `);
+
+    console.log('✅ Found block types:', result.rows.length);
+    res.json(result.rows);
+    
+  } catch (error) {
+    console.error('❌ Error fetching block types:', error);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message,
+      endpoint: '/blocks/types'
+    });
+  }
+});
+
+// Get block levels for dropdowns
+router.get('/levels', async (req, res) => {
+  try {
+    console.log('🔍 /blocks/levels endpoint called');
+    
+    const result = await pool.query(`
+      SELECT id, name, description 
+      FROM block_levels 
+      ORDER BY name ASC
+    `);
+
+    console.log('✅ Found block levels:', result.rows.length);
+    res.json(result.rows);
+    
+  } catch (error) {
+    console.error('❌ Error fetching block levels:', error);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message,
+      endpoint: '/blocks/levels'
+    });
+  }
+});
+
+// Get block states for dropdowns
+router.get('/states', async (req, res) => {
+  try {
+    console.log('🔍 /blocks/states endpoint called');
+    
+    const result = await pool.query(`
+      SELECT id, name, description 
+      FROM block_states 
+      ORDER BY name ASC
+    `);
+
+    console.log('✅ Found block states:', result.rows.length);
+    res.json(result.rows);
+    
+  } catch (error) {
+    console.error('❌ Error fetching block states:', error);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message,
+      endpoint: '/blocks/states'
+    });
+  }
+});
+
+// Get all metadata for dropdowns (combined endpoint)
+router.get('/metadata', async (req, res) => {
+  try {
+    console.log('🔍 /blocks/metadata endpoint called');
+    
+    const [typesResult, levelsResult, statesResult] = await Promise.all([
+      pool.query('SELECT id, name, description FROM block_types ORDER BY name ASC'),
+      pool.query('SELECT id, name, description FROM block_levels ORDER BY name ASC'), 
+      pool.query('SELECT id, name, description FROM block_states ORDER BY name ASC')
+    ]);
+
+    const metadata = {
+      types: typesResult.rows,
+      levels: levelsResult.rows,
+      states: statesResult.rows
+    };
+
+    console.log('✅ Found metadata - Types:', metadata.types.length, 'Levels:', metadata.levels.length, 'States:', metadata.states.length);
+    res.json(metadata);
+    
+  } catch (error) {
+    console.error('❌ Error fetching block metadata:', error);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message,
+      endpoint: '/blocks/metadata'
+    });
   }
 });
 
