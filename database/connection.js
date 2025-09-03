@@ -10,16 +10,17 @@ const path = require('path');
 //  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 //});
 
-// Crea un objeto de configuración para la conexión
-const connectionConfig = {
-  connectionString: process.env.DATABASE_URL,
+const databaseUrl = process.env.DATABASE_URL;
+
+const pool = new Pool({
+  connectionString: databaseUrl,
   ssl: {
-    // Lee el certificado CA desde el archivo
-    ca: fs.readFileSync(path.join(__dirname, 'ca.pem')),
-    // Asegura que la aplicación verifique el certificado del servidor
+    // La clave es el ".." que te permite ir al directorio padre
+    ca: fs.readFileSync(path.join(__dirname, '..', 'ca.pem')),
     rejectUnauthorized: true, 
   },
-};
+});
+
 
 // Test connection
 pool.connect((err, client, release) => {
