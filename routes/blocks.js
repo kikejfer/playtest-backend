@@ -105,15 +105,22 @@ router.get('/available', authenticateToken, async (req, res) => {
     
     const blocksResult = await pool.query(`
       SELECT b.id, b.name, b.description, b.observaciones, b.user_role_id, b.is_public, b.created_at, b.image_url,
+        b.tipo_id, b.nivel_id, b.estado_id,
         u.nickname as creator_nickname,
         u.id as creator_id,
         r.name as created_with_role,
-        COALESCE(ba.total_questions, 0) as question_count
+        COALESCE(ba.total_questions, 0) as question_count,
+        bt.name as tipo_name,
+        bl.name as nivel_name,
+        bs.name as estado_name
       FROM blocks b
       LEFT JOIN user_roles ur ON b.user_role_id = ur.id
       LEFT JOIN users u ON ur.user_id = u.id
       LEFT JOIN roles r ON ur.role_id = r.id
       LEFT JOIN block_answers ba ON b.id = ba.block_id
+      LEFT JOIN block_types bt ON b.tipo_id = bt.id
+      LEFT JOIN block_levels bl ON b.nivel_id = bl.id
+      LEFT JOIN block_states bs ON b.estado_id = bs.id
       WHERE b.is_public = true
       ORDER BY b.created_at DESC
     `);
@@ -168,6 +175,19 @@ router.get('/available', authenticateToken, async (req, res) => {
         isPublic: block.is_public,
         questionCount: parseInt(block.question_count) || 0,
         imageUrl: block.image_url,
+        
+        // Metadata IDs for filtering
+        tipo_id: block.tipo_id,
+        nivel_id: block.nivel_id,
+        estado_id: block.estado_id,
+        
+        // Metadata names
+        metadata: {
+          tipo: block.tipo_name || 'Sin especificar',
+          nivel: block.nivel_name || 'Sin especificar',
+          estado: block.estado_name || 'Sin especificar'
+        },
+        
         questions: questions
       });
     }
@@ -1244,6 +1264,9 @@ router.get('/created-stats', authenticateToken, async (req, res) => {
         r.name as created_with_role,
         
         -- Metadata fields
+        b.tipo_id,
+        b.nivel_id,
+        b.estado_id,
         bt.name as tipo_name,
         bl.name as nivel_name,
         bs.name as estado_name,
@@ -1296,6 +1319,11 @@ router.get('/created-stats', authenticateToken, async (req, res) => {
       imageUrl: block.image_url,
       creatorNickname: block.creator_nickname,
       createdWithRole: block.created_with_role,
+      
+      // Metadata IDs for filtering
+      tipo_id: block.tipo_id,
+      nivel_id: block.nivel_id,
+      estado_id: block.estado_id,
       
       // Metadata
       metadata: {
