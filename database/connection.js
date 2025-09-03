@@ -15,9 +15,9 @@ const databaseUrl = process.env.DATABASE_URL;
 const pool = new Pool({
   connectionString: databaseUrl,
   ssl: {
-    // La clave es el ".." que te permite ir al directorio padre
-    ca: fs.readFileSync(path.join(__dirname, '..', 'ca.pem')),
-    rejectUnauthorized: true, 
+    // Esto deshabilita la verificación del certificado.
+    // Solo debe usarse cuando sabes que te conectas a un servidor de confianza.
+    rejectUnauthorized: false,
   },
 });
 
