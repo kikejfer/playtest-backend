@@ -32,4 +32,10 @@ pool.connect((err, client, release) => {
   }
 });
 
-module.exports = pool;
+//module.exports = pool;
+
+// El resto de tu archivo, como el `module.exports`, queda igual
+module.exports = {
+  pool,
+  query: (text, params) => pool.query(text, params),
+};
