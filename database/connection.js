@@ -4,13 +4,20 @@ const path = require('path');
 
 const databaseUrl = process.env.DATABASE_URL;
 
+if (!databaseUrl) {
+  console.error('❌ DATABASE_URL no está definida en las variables de entorno');
+  process.exit(1);
+}
+
 const pool = new Pool({
   connectionString: databaseUrl,
-  ssl: {
-    // Lee el certificado CA desde el archivo
+  ssl: databaseUrl.includes('sslmode=no-verify') ? {
+    // Aiven con sslmode=no-verify
+    rejectUnauthorized: false,
+  } : {
+    // Configuración SSL con certificado CA (para otros proveedores)
     ca: fs.readFileSync(path.join(__dirname, '..', 'ca.pem')),
-    // Esta línea es crucial para que no intente verificar un certificado de la CA
-    rejectUnauthorized: false, 
+    rejectUnauthorized: false,
   },
 });
 
