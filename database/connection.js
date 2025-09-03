@@ -15,9 +15,10 @@ const pool = new Pool({
     // Aiven con sslmode=no-verify
     rejectUnauthorized: false,
   } : {
-    // Configuración SSL con certificado CA (para otros proveedores)
-    ca: fs.readFileSync(path.join(__dirname, '..', 'ca.pem')),
-    rejectUnauthorized: false,
+    // Configuración SSL con certificado CA (Aiven) - configuración completa
+    ca: fs.readFileSync(path.join(__dirname, 'ca.pem')),
+    rejectUnauthorized: true,
+    servername: 'lumiquiz-db-enferlo-lumiquiz.d.aivencloud.com',
   },
 });
 
