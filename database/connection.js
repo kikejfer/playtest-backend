@@ -1,40 +1,31 @@
-//const { Pool } = require('pg');
-//require('dotenv').config();
-
+// Importa las librerías necesarias
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-
-//const pool = new Pool({
-//  connectionString: process.env.DATABASE_URL,
-//  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
-//});
 
 const databaseUrl = process.env.DATABASE_URL;
 
 const pool = new Pool({
   connectionString: databaseUrl,
   ssl: {
-    // Esto deshabilita la verificación del certificado.
-    // Solo debe usarse cuando sabes que te conectas a un servidor de confianza.
-    rejectUnauthorized: false,
+    // Lee el certificado CA desde el archivo
+    ca: fs.readFileSync(path.join(__dirname, '..', 'ca.pem')),
+    // Asegura que la aplicación verifique el certificado del servidor
+    rejectUnauthorized: true, 
   },
 });
 
-
-// Test connection
+// Prueba la conexión
 pool.connect((err, client, release) => {
   if (err) {
-    console.error('❌ Error acquiring client:', err.stack);
+    console.error('❌ Error adquiriendo cliente:', err.stack);
   } else {
-    console.log('✅ Connected to PostgreSQL database');
+    console.log('✅ Conectado a la base de datos de PostgreSQL');
     release();
   }
 });
 
-//module.exports = pool;
-
-// El resto de tu archivo, como el `module.exports`, queda igual
+// Exporta el pool para que otros módulos lo utilicen
 module.exports = {
   pool,
   query: (text, params) => pool.query(text, params),
