@@ -1,10 +1,25 @@
-const { Pool } = require('pg');
-require('dotenv').config();
+//const { Pool } = require('pg');
+//require('dotenv').config();
 
-const pool = new Pool({
+const { Pool } = require('pg');
+const fs = require('fs');
+const path = require('path');
+
+//const pool = new Pool({
+//  connectionString: process.env.DATABASE_URL,
+//  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+//});
+
+// Crea un objeto de configuración para la conexión
+const connectionConfig = {
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
-});
+  ssl: {
+    // Lee el certificado CA desde el archivo
+    ca: fs.readFileSync(path.join(__dirname, 'ca.pem')),
+    // Asegura que la aplicación verifique el certificado del servidor
+    rejectUnauthorized: true, 
+  },
+};
 
 // Test connection
 pool.connect((err, client, release) => {
