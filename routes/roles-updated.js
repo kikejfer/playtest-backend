@@ -882,7 +882,7 @@ router.get('/admin-secundario-panel', authenticateToken, async (req, res) => {
             JOIN roles r ON ur.role_id = r.id
             LEFT JOIN admin_assignments aa ON u.id = aa.assigned_user_id
             LEFT JOIN users u_admin ON aa.admin_id = u_admin.id
-            LEFT JOIN blocks b ON ur.id = b.user_role_id
+            LEFT JOIN blocks b ON ur.id = b.user_role_id AND r.name = 'profesor'
             LEFT JOIN block_answers ba ON b.id = ba.block_id
             LEFT JOIN user_loaded_blocks ulb ON b.id = ulb.block_id
             WHERE r.name = 'profesor' AND aa.admin_id = $1
@@ -908,7 +908,7 @@ router.get('/admin-secundario-panel', authenticateToken, async (req, res) => {
             JOIN roles r ON ur.role_id = r.id
             LEFT JOIN admin_assignments aa ON u.id = aa.assigned_user_id
             LEFT JOIN users u_admin ON aa.admin_id = u_admin.id
-            LEFT JOIN blocks b ON ur.id = b.user_role_id
+            LEFT JOIN blocks b ON ur.id = b.user_role_id AND r.name = 'creador'
             LEFT JOIN block_answers ba ON b.id = ba.block_id
             LEFT JOIN topic_answers ta ON b.id = ta.block_id
             LEFT JOIN user_loaded_blocks ulb ON b.id = ulb.block_id
