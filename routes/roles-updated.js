@@ -882,9 +882,12 @@ router.get('/admin-secundario-panel', authenticateToken, async (req, res) => {
             JOIN roles r ON ur.role_id = r.id
             LEFT JOIN admin_assignments aa ON u.id = aa.assigned_user_id
             LEFT JOIN users u_admin ON aa.admin_id = u_admin.id
-            LEFT JOIN blocks b ON ur.id = b.user_role_id AND r.name = 'profesor'
-            LEFT JOIN block_answers ba ON b.id = ba.block_id
-            LEFT JOIN user_loaded_blocks ulb ON b.id = ulb.block_id
+            LEFT JOIN blocks b ON ur.id = b.user_role_id 
+            LEFT JOIN user_roles ur_block ON b.user_role_id = ur_block.id
+            LEFT JOIN roles r_block ON ur_block.role_id = r_block.id AND r_block.name = 'profesor'
+            LEFT JOIN block_answers ba ON b.id = ba.block_id AND r_block.id IS NOT NULL
+            LEFT JOIN topic_answers ta ON b.id = ta.block_id AND r_block.id IS NOT NULL
+            LEFT JOIN user_loaded_blocks ulb ON b.id = ulb.block_id AND r_block.id IS NOT NULL
             WHERE r.name = 'profesor' AND aa.admin_id = $1
             GROUP BY u.id, u.nickname, u.first_name, u.email, ur.id, u_admin.nickname
             ORDER BY u.nickname
@@ -908,10 +911,12 @@ router.get('/admin-secundario-panel', authenticateToken, async (req, res) => {
             JOIN roles r ON ur.role_id = r.id
             LEFT JOIN admin_assignments aa ON u.id = aa.assigned_user_id
             LEFT JOIN users u_admin ON aa.admin_id = u_admin.id
-            LEFT JOIN blocks b ON ur.id = b.user_role_id AND r.name = 'creador'
-            LEFT JOIN block_answers ba ON b.id = ba.block_id
-            LEFT JOIN topic_answers ta ON b.id = ta.block_id
-            LEFT JOIN user_loaded_blocks ulb ON b.id = ulb.block_id
+            LEFT JOIN blocks b ON ur.id = b.user_role_id 
+            LEFT JOIN user_roles ur_block ON b.user_role_id = ur_block.id
+            LEFT JOIN roles r_block ON ur_block.role_id = r_block.id AND r_block.name = 'creador'
+            LEFT JOIN block_answers ba ON b.id = ba.block_id AND r_block.id IS NOT NULL
+            LEFT JOIN topic_answers ta ON b.id = ta.block_id AND r_block.id IS NOT NULL
+            LEFT JOIN user_loaded_blocks ulb ON b.id = ulb.block_id AND r_block.id IS NOT NULL
             WHERE r.name = 'creador' AND aa.admin_id = $1
             GROUP BY u.id, u.nickname, u.first_name, u.email, ur.id, u_admin.nickname
             ORDER BY u.nickname
