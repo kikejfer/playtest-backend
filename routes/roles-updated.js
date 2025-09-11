@@ -582,6 +582,217 @@ router.get('/usuarios/:userId/estadisticas', authenticateToken, async (req, res)
     }
 });
 
+// Endpoint para obtener administrados filtrados por admin_assignments
+router.get('/administrados/:rol', authenticateToken, async (req, res) => {
+    try {
+        const { rol } = req.params; // 'profesores' | 'creadores'
+        const currentUserId = req.user.id;
+        
+        console.log(`🔍 Obteniendo ${rol} administrados para usuario ${currentUserId}`);
+        
+        // Verificar rol del usuario actual
+        const userRoleQuery = await pool.query(`
+            SELECT r.name as role_name
+            FROM user_roles ur
+            JOIN roles r ON ur.role_id = r.id
+            WHERE ur.user_id = $1
+        `, [currentUserId]);
+        
+        const userRoles = userRoleQuery.rows.map(row => row.role_name);
+        const isAdminPrincipal = userRoles.includes('administrador_principal');
+        const isAdminSecundario = userRoles.includes('administrador_secundario');
+        
+        if (!isAdminPrincipal && !isAdminSecundario) {
+            return res.status(403).json({ error: 'Usuario no autorizado para ver administrados' });
+        }
+        
+        let administradosQuery;
+        let params;
+        
+        if (isAdminPrincipal) {
+            // PAP: todos los assigned_user_id especificando su admin_id
+            administradosQuery = `
+                SELECT DISTINCT 
+                    u.id,
+                    u.nickname,
+                    u.email,
+                    u.first_name,
+                    u.last_name,
+                    aa.assigned_user_id,
+                    aa.admin_id,
+                    u_admin.nickname as assigned_admin_nickname
+                FROM users u
+                JOIN user_roles ur ON u.id = ur.user_id
+                JOIN roles r ON ur.role_id = r.id
+                LEFT JOIN admin_assignments aa ON u.id = aa.assigned_user_id
+                LEFT JOIN users u_admin ON aa.admin_id = u_admin.id
+                WHERE r.name = $1
+                ORDER BY u.nickname
+            `;
+            params = [rol.slice(0, -1)]; // 'profesores' -> 'profesor'
+        } else {
+            // PAS: los assigned_user_id asignados al admin_id del usuario actual
+            administradosQuery = `
+                SELECT DISTINCT 
+                    u.id,
+                    u.nickname,
+                    u.email,
+                    u.first_name,
+                    u.last_name,
+                    aa.assigned_user_id,
+                    aa.admin_id,
+                    u_admin.nickname as assigned_admin_nickname
+                FROM users u
+                JOIN user_roles ur ON u.id = ur.user_id
+                JOIN roles r ON ur.role_id = r.id
+                JOIN admin_assignments aa ON u.id = aa.assigned_user_id
+                LEFT JOIN users u_admin ON aa.admin_id = u_admin.id
+                WHERE r.name = $1 AND aa.admin_id = $2
+                ORDER BY u.nickname
+            `;
+            params = [rol.slice(0, -1), currentUserId]; // 'profesores' -> 'profesor'
+        }
+        
+        const result = await pool.query(administradosQuery, params);
+        
+        // Obtener administradores disponibles (solo para PAP)
+        let availableAdmins = [];
+        if (isAdminPrincipal) {
+            const adminsQuery = await pool.query(`
+                SELECT DISTINCT u.id, u.nickname, r.name as role_name
+                FROM users u
+                JOIN user_roles ur ON u.id = ur.user_id
+                JOIN roles r ON ur.role_id = r.id
+                WHERE r.name IN ('administrador_principal', 'administrador_secundario')
+                ORDER BY u.nickname
+            `);
+            availableAdmins = adminsQuery.rows;
+        }
+        
+        res.json({
+            administrados: result.rows,
+            availableAdmins: availableAdmins,
+            total: result.rows.length,
+            panel_type: isAdminPrincipal ? 'PAP' : 'PAS'
+        });
+        
+    } catch (error) {
+        console.error('Error obteniendo administrados:', error);
+        res.status(500).json({ 
+            error: 'Error interno del servidor', 
+            details: error.message 
+        });
+    }
+});
+
+// Endpoint para obtener características de un administrado
+router.get('/administrados/:userId/caracteristicas', authenticateToken, async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { rol } = req.query; // 'profesor' | 'creador'
+        
+        console.log(`📊 Calculando características de administrado ${userId} con rol ${rol}`);
+        
+        // Información básica del usuario
+        const userQuery = await pool.query(`
+            SELECT id, nickname, email, first_name, last_name
+            FROM users
+            WHERE id = $1
+        `, [userId]);
+        
+        if (userQuery.rows.length === 0) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+        
+        const user = userQuery.rows[0];
+        
+        // Bloques creados por el assigned_user_id (tabla blocks filtrado por user_role_id + rol)
+        const blocksQuery = await pool.query(`
+            SELECT COUNT(DISTINCT b.id) as total_blocks
+            FROM blocks b
+            JOIN user_roles ur ON b.user_role_id = ur.id
+            JOIN roles r ON ur.role_id = r.id
+            WHERE ur.user_id = $1 AND r.name = $2
+        `, [userId, rol]);
+        
+        const totalBlocks = parseInt(blocksQuery.rows[0].total_blocks) || 0;
+        
+        // Temas totales (de tabla topic_answers contando registros por block_id)
+        const topicsQuery = await pool.query(`
+            SELECT COUNT(DISTINCT ta.topic) as total_topics
+            FROM blocks b
+            JOIN user_roles ur ON b.user_role_id = ur.id
+            JOIN roles r ON ur.role_id = r.id
+            LEFT JOIN topic_answers ta ON b.id = ta.block_id
+            WHERE ur.user_id = $1 AND r.name = $2 
+            AND ta.topic IS NOT NULL AND ta.topic != ''
+        `, [userId, rol]);
+        
+        const totalTopics = parseInt(topicsQuery.rows[0].total_topics) || 0;
+        
+        // Preguntas totales (total_questions de tabla block_answers)
+        const questionsQuery = await pool.query(`
+            SELECT COALESCE(SUM(ba.total_questions), 0) as total_questions
+            FROM blocks b
+            JOIN user_roles ur ON b.user_role_id = ur.id
+            JOIN roles r ON ur.role_id = r.id
+            LEFT JOIN block_answers ba ON b.id = ba.block_id
+            WHERE ur.user_id = $1 AND r.name = $2
+        `, [userId, rol]);
+        
+        const totalQuestions = parseInt(questionsQuery.rows[0].total_questions) || 0;
+        
+        // Alumnos/Estudiantes (número de registros de user_loaded_blocks)
+        const usersQuery = await pool.query(`
+            SELECT COUNT(DISTINCT ulb.user_id) as total_users
+            FROM blocks b
+            JOIN user_roles ur ON b.user_role_id = ur.id
+            JOIN roles r ON ur.role_id = r.id
+            LEFT JOIN user_loaded_blocks ulb ON b.id = ulb.block_id
+            WHERE ur.user_id = $1 AND r.name = $2
+        `, [userId, rol]);
+        
+        const totalUsers = parseInt(usersQuery.rows[0].total_users) || 0;
+        
+        // Administrador asignado
+        const adminQuery = await pool.query(`
+            SELECT aa.admin_id, u_admin.nickname as assigned_admin_nickname
+            FROM admin_assignments aa
+            LEFT JOIN users u_admin ON aa.admin_id = u_admin.id
+            WHERE aa.assigned_user_id = $1
+        `, [userId]);
+        
+        const adminAssignment = adminQuery.rows[0] || {};
+        
+        const result = {
+            nickname: user.nickname,
+            email: user.email,
+            full_name: [user.first_name, user.last_name].filter(Boolean).join(' '),
+            total_blocks: totalBlocks,
+            total_topics: totalTopics,
+            total_questions: totalQuestions,
+            total_users: totalUsers,
+            assigned_admin_id: adminAssignment.admin_id || null,
+            assigned_admin_nickname: adminAssignment.assigned_admin_nickname || 'Sin asignar'
+        };
+        
+        console.log(`📊 Características calculadas para ${user.nickname}:`, result);
+        
+        res.json(result);
+        
+    } catch (error) {
+        console.error('Error calculando características:', error);
+        res.status(500).json({ 
+            error: 'Error interno del servidor', 
+            details: error.message,
+            total_blocks: 0,
+            total_topics: 0,
+            total_questions: 0,
+            total_users: 0
+        });
+    }
+});
+
 // Panel secundario (sin sección de administradores)
 router.get('/admin-secundario-panel', authenticateToken, async (req, res) => {
     try {
@@ -1240,6 +1451,112 @@ router.post('/reassign-user', authenticateToken, async (req, res) => {
         res.status(500).json({ 
             error: 'Error reasignando usuario',
             details: error.message 
+        });
+    }
+});
+
+// Endpoint para obtener bloques de un administrado
+router.get('/administrados/:userId/bloques', authenticateToken, async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { rol } = req.query; // 'profesor' | 'creador'
+        
+        console.log(`📚 Obteniendo bloques de administrado ${userId} con rol ${rol}`);
+        
+        // Bloques filtrados de tabla blocks creados por el usuario con el rol correspondiente
+        const blocksQuery = await pool.query(`
+            SELECT DISTINCT
+                b.id,
+                b.name,
+                b.created_at,
+                (SELECT COUNT(DISTINCT ta.topic) 
+                 FROM topic_answers ta 
+                 WHERE ta.block_id = b.id 
+                 AND ta.topic IS NOT NULL AND ta.topic != '') as total_topics,
+                (SELECT COALESCE(ba.total_questions, 0) 
+                 FROM block_answers ba 
+                 WHERE ba.block_id = b.id) as total_questions,
+                (SELECT COUNT(DISTINCT ulb.user_id) 
+                 FROM user_loaded_blocks ulb 
+                 WHERE ulb.block_id = b.id) as total_users
+            FROM blocks b
+            JOIN user_roles ur ON b.user_role_id = ur.id
+            JOIN roles r ON ur.role_id = r.id
+            WHERE ur.user_id = $1 AND r.name = $2
+            ORDER BY b.created_at DESC
+        `, [userId, rol]);
+        
+        const bloques = blocksQuery.rows;
+        
+        console.log(`📚 Encontrados ${bloques.length} bloques para ${rol} ${userId}`);
+        
+        res.json({
+            bloques: bloques,
+            total: bloques.length,
+            user_id: userId,
+            rol: rol
+        });
+        
+    } catch (error) {
+        console.error('Error obteniendo bloques de administrado:', error);
+        res.status(500).json({ 
+            error: 'Error interno del servidor', 
+            details: error.message,
+            bloques: []
+        });
+    }
+});
+
+// Endpoint para obtener preguntas de un tema específico
+router.get('/bloques/:blockId/temas/:topic/preguntas', authenticateToken, async (req, res) => {
+    try {
+        const { blockId, topic } = req.params;
+        
+        console.log(`❓ Obteniendo preguntas del tema "${topic}" del bloque ${blockId}`);
+        
+        // Esta sería una implementación básica - necesitarías adaptarla según tu estructura
+        // de datos para las preguntas individuales
+        const preguntasQuery = await pool.query(`
+            SELECT 
+                ta.id,
+                ta.topic,
+                ta.total_questions,
+                'Pregunta de ejemplo - estructura por definir' as question
+            FROM topic_answers ta
+            WHERE ta.block_id = $1 AND ta.topic = $2
+            ORDER BY ta.id
+        `, [blockId, topic]);
+        
+        const preguntas = [];
+        const topicData = preguntasQuery.rows[0];
+        
+        if (topicData) {
+            // Generar preguntas de ejemplo basadas en total_questions
+            for (let i = 1; i <= (topicData.total_questions || 1); i++) {
+                preguntas.push({
+                    id: `${blockId}-${topic}-${i}`,
+                    question: `Pregunta ${i} del tema "${topic}" (Bloque ${blockId})`,
+                    topic: topic,
+                    block_id: blockId
+                });
+            }
+        }
+        
+        console.log(`❓ Encontradas ${preguntas.length} preguntas para tema "${topic}"`);
+        
+        res.json({
+            questions: preguntas,
+            total: preguntas.length,
+            block_id: blockId,
+            topic: topic
+        });
+        
+    } catch (error) {
+        console.error('Error obteniendo preguntas del tema:', error);
+        res.status(500).json({ 
+            error: 'Error interno del servidor', 
+            details: error.message,
+            questions: []
         });
     }
 });
