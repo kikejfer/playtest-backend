@@ -501,14 +501,23 @@ router.get('/usuarios/:userId/estadisticas', authenticateToken, async (req, res)
             return res.status(400).json({ error: 'Rol válido requerido (profesor/creador)' });
         }
         
+        // Determinar role_id basado en el parámetro rol
+        let targetRoleId;
+        if (rol === 'profesor') {
+            targetRoleId = 3; // profesor
+        } else if (rol === 'creador') {
+            targetRoleId = 4; // creador
+        } else {
+            return res.status(400).json({ error: 'Rol inválido. Use profesor o creador.' });
+        }
+        
         // 1. Contar bloques creados con rol específico
         const blocksQuery = await pool.query(`
             SELECT COUNT(DISTINCT b.id) as blocks_count
             FROM blocks b
             JOIN user_roles ur ON b.user_role_id = ur.id
-            JOIN roles r ON ur.role_id = r.id
-            WHERE ur.user_id = $1 AND r.name = $2
-        `, [userId, rol]);
+            WHERE ur.user_id = $1 AND ur.role_id = $2
+        `, [userId, targetRoleId]);
         
         const blocksCount = parseInt(blocksQuery.rows[0].blocks_count) || 0;
         
@@ -526,10 +535,9 @@ router.get('/usuarios/:userId/estadisticas', authenticateToken, async (req, res)
             SELECT COALESCE(SUM(ba.total_questions), 0) as total_questions
             FROM blocks b
             JOIN user_roles ur ON b.user_role_id = ur.id
-            JOIN roles r ON ur.role_id = r.id
             LEFT JOIN block_answers ba ON b.id = ba.block_id
-            WHERE ur.user_id = $1 AND r.name = $2
-        `, [userId, rol]);
+            WHERE ur.user_id = $1 AND ur.role_id = $2
+        `, [userId, targetRoleId]);
         
         const totalQuestions = parseInt(questionsQuery.rows[0].total_questions) || 0;
         
@@ -538,11 +546,10 @@ router.get('/usuarios/:userId/estadisticas', authenticateToken, async (req, res)
             SELECT COUNT(DISTINCT ta.topic) as total_topics
             FROM blocks b
             JOIN user_roles ur ON b.user_role_id = ur.id
-            JOIN roles r ON ur.role_id = r.id
             LEFT JOIN topic_answers ta ON b.id = ta.block_id
-            WHERE ur.user_id = $1 AND r.name = $2 
+            WHERE ur.user_id = $1 AND ur.role_id = $2 
             AND ta.topic IS NOT NULL AND ta.topic != ''
-        `, [userId, rol]);
+        `, [userId, targetRoleId]);
         
         const totalTopics = parseInt(topicsQuery.rows[0].total_topics) || 0;
         
@@ -551,10 +558,9 @@ router.get('/usuarios/:userId/estadisticas', authenticateToken, async (req, res)
             SELECT COUNT(DISTINCT ulb.user_id) as total_users
             FROM blocks b
             JOIN user_roles ur ON b.user_role_id = ur.id
-            JOIN roles r ON ur.role_id = r.id
             LEFT JOIN user_loaded_blocks ulb ON b.id = ulb.block_id
-            WHERE ur.user_id = $1 AND r.name = $2
-        `, [userId, rol]);
+            WHERE ur.user_id = $1 AND ur.role_id = $2
+        `, [userId, targetRoleId]);
         
         const totalUsers = parseInt(usersQuery.rows[0].total_users) || 0;
         
@@ -590,17 +596,17 @@ router.get('/administrados/:rol', authenticateToken, async (req, res) => {
         
         console.log(`🔍 Obteniendo ${rol} administrados para usuario ${currentUserId}`);
         
-        // Verificar rol del usuario actual
+        // Verificar rol del usuario actual usando IDs
         const userRoleQuery = await pool.query(`
-            SELECT r.name as role_name
+            SELECT ur.role_id, r.name as role_name
             FROM user_roles ur
             JOIN roles r ON ur.role_id = r.id
             WHERE ur.user_id = $1
         `, [currentUserId]);
         
-        const userRoles = userRoleQuery.rows.map(row => row.role_name);
-        const isAdminPrincipal = userRoles.includes('administrador_principal');
-        const isAdminSecundario = userRoles.includes('administrador_secundario');
+        const userRoleIds = userRoleQuery.rows.map(row => row.role_id);
+        const isAdminPrincipal = userRoleIds.includes(1); // administrador_principal
+        const isAdminSecundario = userRoleIds.includes(2); // administrador_secundario
         
         if (!isAdminPrincipal && !isAdminSecundario) {
             return res.status(403).json({ error: 'Usuario no autorizado para ver administrados' });
@@ -609,6 +615,16 @@ router.get('/administrados/:rol', authenticateToken, async (req, res) => {
         let administradosQuery;
         let params;
         
+        // Determinar role_id basado en el parámetro
+        let targetRoleId;
+        if (rol === 'profesores') {
+            targetRoleId = 3; // profesor
+        } else if (rol === 'creadores') {
+            targetRoleId = 4; // creador
+        } else {
+            return res.status(400).json({ error: 'Rol inválido. Use profesores o creadores.' });
+        }
+
         if (isAdminPrincipal) {
             // PAP: todos los assigned_user_id especificando su admin_id
             administradosQuery = `
@@ -623,13 +639,12 @@ router.get('/administrados/:rol', authenticateToken, async (req, res) => {
                     u_admin.nickname as assigned_admin_nickname
                 FROM users u
                 JOIN user_roles ur ON u.id = ur.user_id
-                JOIN roles r ON ur.role_id = r.id
                 LEFT JOIN admin_assignments aa ON u.id = aa.assigned_user_id
                 LEFT JOIN users u_admin ON aa.admin_id = u_admin.id
-                WHERE r.name = $1
+                WHERE ur.role_id = $1
                 ORDER BY u.nickname
             `;
-            params = [rol.slice(0, -1)]; // 'profesores' -> 'profesor'
+            params = [targetRoleId];
         } else {
             // PAS: los assigned_user_id asignados al admin_id del usuario actual
             administradosQuery = `
@@ -644,13 +659,12 @@ router.get('/administrados/:rol', authenticateToken, async (req, res) => {
                     u_admin.nickname as assigned_admin_nickname
                 FROM users u
                 JOIN user_roles ur ON u.id = ur.user_id
-                JOIN roles r ON ur.role_id = r.id
                 JOIN admin_assignments aa ON u.id = aa.assigned_user_id
                 LEFT JOIN users u_admin ON aa.admin_id = u_admin.id
-                WHERE r.name = $1 AND aa.admin_id = $2
+                WHERE ur.role_id = $1 AND aa.admin_id = $2
                 ORDER BY u.nickname
             `;
-            params = [rol.slice(0, -1), currentUserId]; // 'profesores' -> 'profesor'
+            params = [targetRoleId, currentUserId];
         }
         
         const result = await pool.query(administradosQuery, params);
@@ -663,7 +677,7 @@ router.get('/administrados/:rol', authenticateToken, async (req, res) => {
                 FROM users u
                 JOIN user_roles ur ON u.id = ur.user_id
                 JOIN roles r ON ur.role_id = r.id
-                WHERE r.name IN ('administrador_principal', 'administrador_secundario')
+                WHERE ur.role_id IN (1, 2)
                 ORDER BY u.nickname
             `);
             availableAdmins = adminsQuery.rows;
@@ -693,6 +707,16 @@ router.get('/administrados/:userId/caracteristicas', authenticateToken, async (r
         
         console.log(`📊 Calculando características de administrado ${userId} con rol ${rol}`);
         
+        // Determinar role_id basado en el parámetro rol
+        let targetRoleId;
+        if (rol === 'profesor') {
+            targetRoleId = 3; // profesor
+        } else if (rol === 'creador') {
+            targetRoleId = 4; // creador
+        } else {
+            return res.status(400).json({ error: 'Rol inválido. Use profesor o creador.' });
+        }
+        
         // Información básica del usuario
         const userQuery = await pool.query(`
             SELECT id, nickname, email, first_name, last_name
@@ -711,9 +735,8 @@ router.get('/administrados/:userId/caracteristicas', authenticateToken, async (r
             SELECT COUNT(DISTINCT b.id) as total_blocks
             FROM blocks b
             JOIN user_roles ur ON b.user_role_id = ur.id
-            JOIN roles r ON ur.role_id = r.id
-            WHERE ur.user_id = $1 AND r.name = $2
-        `, [userId, rol]);
+            WHERE ur.user_id = $1 AND ur.role_id = $2
+        `, [userId, targetRoleId]);
         
         const totalBlocks = parseInt(blocksQuery.rows[0].total_blocks) || 0;
         
@@ -722,11 +745,10 @@ router.get('/administrados/:userId/caracteristicas', authenticateToken, async (r
             SELECT COUNT(DISTINCT ta.topic) as total_topics
             FROM blocks b
             JOIN user_roles ur ON b.user_role_id = ur.id
-            JOIN roles r ON ur.role_id = r.id
             LEFT JOIN topic_answers ta ON b.id = ta.block_id
-            WHERE ur.user_id = $1 AND r.name = $2 
+            WHERE ur.user_id = $1 AND ur.role_id = $2 
             AND ta.topic IS NOT NULL AND ta.topic != ''
-        `, [userId, rol]);
+        `, [userId, targetRoleId]);
         
         const totalTopics = parseInt(topicsQuery.rows[0].total_topics) || 0;
         
@@ -735,10 +757,9 @@ router.get('/administrados/:userId/caracteristicas', authenticateToken, async (r
             SELECT COALESCE(SUM(ba.total_questions), 0) as total_questions
             FROM blocks b
             JOIN user_roles ur ON b.user_role_id = ur.id
-            JOIN roles r ON ur.role_id = r.id
             LEFT JOIN block_answers ba ON b.id = ba.block_id
-            WHERE ur.user_id = $1 AND r.name = $2
-        `, [userId, rol]);
+            WHERE ur.user_id = $1 AND ur.role_id = $2
+        `, [userId, targetRoleId]);
         
         const totalQuestions = parseInt(questionsQuery.rows[0].total_questions) || 0;
         
@@ -747,10 +768,9 @@ router.get('/administrados/:userId/caracteristicas', authenticateToken, async (r
             SELECT COUNT(DISTINCT ulb.user_id) as total_users
             FROM blocks b
             JOIN user_roles ur ON b.user_role_id = ur.id
-            JOIN roles r ON ur.role_id = r.id
             LEFT JOIN user_loaded_blocks ulb ON b.id = ulb.block_id
-            WHERE ur.user_id = $1 AND r.name = $2
-        `, [userId, rol]);
+            WHERE ur.user_id = $1 AND ur.role_id = $2
+        `, [userId, targetRoleId]);
         
         const totalUsers = parseInt(usersQuery.rows[0].total_users) || 0;
         
@@ -1463,6 +1483,16 @@ router.get('/administrados/:userId/bloques', authenticateToken, async (req, res)
         
         console.log(`📚 Obteniendo bloques de administrado ${userId} con rol ${rol}`);
         
+        // Determinar role_id basado en el parámetro rol
+        let targetRoleId;
+        if (rol === 'profesor') {
+            targetRoleId = 3; // profesor
+        } else if (rol === 'creador') {
+            targetRoleId = 4; // creador
+        } else {
+            return res.status(400).json({ error: 'Rol inválido. Use profesor o creador.' });
+        }
+        
         // Bloques filtrados de tabla blocks creados por el usuario con el rol correspondiente
         const blocksQuery = await pool.query(`
             SELECT DISTINCT
@@ -1481,10 +1511,9 @@ router.get('/administrados/:userId/bloques', authenticateToken, async (req, res)
                  WHERE ulb.block_id = b.id) as total_users
             FROM blocks b
             JOIN user_roles ur ON b.user_role_id = ur.id
-            JOIN roles r ON ur.role_id = r.id
-            WHERE ur.user_id = $1 AND r.name = $2
+            WHERE ur.user_id = $1 AND ur.role_id = $2
             ORDER BY b.created_at DESC
-        `, [userId, rol]);
+        `, [userId, targetRoleId]);
         
         const bloques = blocksQuery.rows;
         
