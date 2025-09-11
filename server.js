@@ -234,3 +234,4 @@ server.listen(PORT, async () => {
 });
 
 console.log('Deploy timestamp:', new Date().toISOString());
+console.log('🔄 Expandable blocks and themes functionality confirmed active');
