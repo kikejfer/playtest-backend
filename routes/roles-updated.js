@@ -1541,51 +1541,41 @@ router.get('/bloques/:blockId/temas/:topic/preguntas', authenticateToken, async 
     try {
         const { blockId, topic } = req.params;
         
-        console.log(`❓ Obteniendo preguntas del tema "${topic}" del bloque ${blockId}`);
+        console.log(`❓ Obteniendo preguntas del tema "${topic}" del bloque ${blockId} desde tabla questions`);
         
-        // Esta sería una implementación básica - necesitarías adaptarla según tu estructura
-        // de datos para las preguntas individuales
+        // Las preguntas son los registros text_questions que se obtienen filtrando questions con block_id y topic
         const preguntasQuery = await pool.query(`
             SELECT 
-                ta.id,
-                ta.topic,
-                ta.total_questions,
-                'Pregunta de ejemplo - estructura por definir' as question
-            FROM topic_answers ta
-            WHERE ta.block_id = $1 AND ta.topic = $2
-            ORDER BY ta.id
+                q.id,
+                q.text_questions as question,
+                q.block_id,
+                q.topic
+            FROM questions q
+            WHERE q.block_id = $1 AND q.topic = $2
+            ORDER BY q.id
         `, [blockId, topic]);
         
-        const preguntas = [];
-        const topicData = preguntasQuery.rows[0];
+        const preguntas = preguntasQuery.rows;
         
-        if (topicData) {
-            // Generar preguntas de ejemplo basadas en total_questions
-            for (let i = 1; i <= (topicData.total_questions || 1); i++) {
-                preguntas.push({
-                    id: `${blockId}-${topic}-${i}`,
-                    question: `Pregunta ${i} del tema "${topic}" (Bloque ${blockId})`,
-                    topic: topic,
-                    block_id: blockId
-                });
-            }
-        }
-        
-        console.log(`❓ Encontradas ${preguntas.length} preguntas para tema "${topic}"`);
+        console.log(`❓ Encontradas ${preguntas.length} preguntas reales para tema "${topic}" en bloque ${blockId}`);
         
         res.json({
+            success: true,
             questions: preguntas,
+            preguntas: preguntas, // Alias para compatibilidad
             total: preguntas.length,
-            block_id: blockId,
+            block_id: parseInt(blockId),
             topic: topic
         });
         
     } catch (error) {
-        console.error('Error obteniendo preguntas del tema:', error);
+        console.error('Error obteniendo preguntas del tema desde tabla questions:', error);
         res.status(500).json({ 
-            error: 'Error interno del servidor', 
+            success: false,
+            error: 'Error obteniendo preguntas del tema', 
             details: error.message,
-            questions: []
+            questions: [],
+            preguntas: []
         });
     }
 });
@@ -1861,29 +1851,37 @@ router.get('/bloques', authenticateToken, async (req, res) => {
 router.get('/bloques/:blockId/temas', authenticateToken, async (req, res) => {
     try {
         const { blockId } = req.params;
-        console.log(`Request to get topics for block ${blockId}`);
+        console.log(`📝 Obteniendo temas del bloque ${blockId} desde topic_answers`);
         
-        // Obtener temas usando la tabla optimizada topic_answers
+        // Temas son los registros topic que se obtienen filtrando topic_answers con block_id
         const temasResult = await pool.query(`
-            SELECT 
+            SELECT DISTINCT
                 ta.topic,
-                ta.question_count as num_preguntas
+                ta.total_questions
             FROM topic_answers ta
             WHERE ta.block_id = $1
+            AND ta.topic IS NOT NULL 
+            AND ta.topic != ''
             ORDER BY ta.topic
         `, [blockId]);
         
+        console.log(`📝 Encontrados ${temasResult.rows.length} temas para bloque ${blockId}`);
+        
         res.json({
             success: true,
-            temas: temasResult.rows,
+            topics: temasResult.rows,
+            temas: temasResult.rows, // Alias para compatibilidad
+            total: temasResult.rows.length,
             block_id: parseInt(blockId)
         });
         
     } catch (error) {
-        console.error('Error getting block topics:', error);
+        console.error('Error obteniendo temas del bloque:', error);
         res.status(500).json({ 
             error: 'Error obteniendo temas del bloque',
-            details: error.message 
+            details: error.message,
+            topics: [],
+            temas: [] 
         });
     }
 });
