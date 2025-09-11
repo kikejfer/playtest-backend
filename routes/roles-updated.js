@@ -27,7 +27,8 @@ router.get('/debug-users', authenticateToken, async (req, res) => {
         const usersWithBlocks = await pool.query(`
             SELECT DISTINCT u.id, u.nickname, u.email, COUNT(b.id) as block_count
             FROM users u
-            INNER JOIN blocks b ON u.id = b.user_id
+            INNER JOIN user_roles ur ON u.id = ur.user_id
+            INNER JOIN blocks b ON ur.id = b.user_role_id
             GROUP BY u.id, u.nickname, u.email
             ORDER BY u.id LIMIT 10
         `);
@@ -105,14 +106,11 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
             
             // Contar bloques de usuarios asignados por administrador
             const blockCounts = await pool.query(`
-                SELECT aa.admin_id, COUNT(DISTINCT b.id) as block_count, COALESCE(SUM(q_count.question_count), 0) as question_count
+                SELECT aa.admin_id, COUNT(DISTINCT b.id) as block_count, COALESCE(SUM(ba.total_questions), 0) as question_count
                 FROM admin_assignments aa
-                JOIN blocks b ON aa.assigned_user_id = b.user_id
-                LEFT JOIN (
-                    SELECT block_id, COUNT(*) as question_count 
-                    FROM questions 
-                    GROUP BY block_id
-                ) q_count ON b.id = q_count.block_id
+                JOIN user_roles ur ON aa.assigned_user_id = ur.user_id
+                JOIN blocks b ON ur.id = b.user_role_id
+                LEFT JOIN block_answers ba ON b.id = ba.block_id
                 GROUP BY aa.admin_id
             `);
             
@@ -246,7 +244,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                     FROM blocks b
                     JOIN user_roles ur ON b.user_role_id = ur.id
                     JOIN roles r ON ur.role_id = r.id
-                    WHERE b.user_id = $1 AND r.name = $2
+                    WHERE ur.user_id = $1 AND r.name = $2
                 `, [userId, roleName]);
                 
                 const blocksCount = parseInt(blocksQuery.rows[0].blocks_count) || 0;
@@ -267,7 +265,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                     JOIN user_roles ur ON b.user_role_id = ur.id
                     JOIN roles r ON ur.role_id = r.id
                     LEFT JOIN block_answers ba ON b.id = ba.block_id
-                    WHERE b.user_id = $1 AND r.name = $2
+                    WHERE ur.user_id = $1 AND r.name = $2
                 `, [userId, roleName]);
                 
                 const totalQuestions = parseInt(questionsQuery.rows[0].total_questions) || 0;
@@ -279,7 +277,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                     JOIN user_roles ur ON b.user_role_id = ur.id
                     JOIN roles r ON ur.role_id = r.id
                     LEFT JOIN topic_answers ta ON b.id = ta.block_id
-                    WHERE b.user_id = $1 AND r.name = $2
+                    WHERE ur.user_id = $1 AND r.name = $2
                 `, [userId, roleName]);
                 
                 const totalTopics = parseInt(topicsQuery.rows[0].total_topics) || 0;
@@ -291,7 +289,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                     JOIN user_roles ur ON b.user_role_id = ur.id
                     JOIN roles r ON ur.role_id = r.id
                     LEFT JOIN user_loaded_blocks ulb ON b.id = ulb.block_id
-                    WHERE b.user_id = $1 AND r.name = $2
+                    WHERE ur.user_id = $1 AND r.name = $2
                 `, [userId, roleName]);
                 
                 const totalUsers = parseInt(usersQuery.rows[0].total_users) || 0;
@@ -615,7 +613,7 @@ router.get('/admin-secundario-panel', authenticateToken, async (req, res) => {
                     FROM blocks b
                     JOIN user_roles ur ON b.user_role_id = ur.id
                     JOIN roles r ON ur.role_id = r.id
-                    WHERE b.user_id = $1 AND r.name = $2
+                    WHERE ur.user_id = $1 AND r.name = $2
                 `, [userId, roleName]);
                 
                 const blocksCount = parseInt(blocksQuery.rows[0].blocks_count) || 0;
@@ -630,7 +628,7 @@ router.get('/admin-secundario-panel', authenticateToken, async (req, res) => {
                     JOIN user_roles ur ON b.user_role_id = ur.id
                     JOIN roles r ON ur.role_id = r.id
                     LEFT JOIN block_answers ba ON b.id = ba.block_id
-                    WHERE b.user_id = $1 AND r.name = $2
+                    WHERE ur.user_id = $1 AND r.name = $2
                 `, [userId, roleName]);
                 
                 const totalQuestions = parseInt(questionsQuery.rows[0].total_questions) || 0;
@@ -641,7 +639,7 @@ router.get('/admin-secundario-panel', authenticateToken, async (req, res) => {
                     JOIN user_roles ur ON b.user_role_id = ur.id
                     JOIN roles r ON ur.role_id = r.id
                     LEFT JOIN topic_answers ta ON b.id = ta.block_id
-                    WHERE b.user_id = $1 AND r.name = $2
+                    WHERE ur.user_id = $1 AND r.name = $2
                 `, [userId, roleName]);
                 
                 const totalTopics = parseInt(topicsQuery.rows[0].total_topics) || 0;
@@ -652,7 +650,7 @@ router.get('/admin-secundario-panel', authenticateToken, async (req, res) => {
                     JOIN user_roles ur ON b.user_role_id = ur.id
                     JOIN roles r ON ur.role_id = r.id
                     LEFT JOIN user_loaded_blocks ulb ON b.id = ulb.block_id
-                    WHERE b.user_id = $1 AND r.name = $2
+                    WHERE ur.user_id = $1 AND r.name = $2
                 `, [userId, roleName]);
                 
                 const totalUsers = parseInt(usersQuery.rows[0].total_users) || 0;
@@ -1336,7 +1334,7 @@ router.get('/profesores/:profesorId/bloques', authenticateToken, async (req, res
             JOIN user_roles ur ON b.user_role_id = ur.id
             JOIN roles r ON ur.role_id = r.id
             LEFT JOIN topic_answers ta ON b.id = ta.block_id
-            WHERE b.user_id = $1 AND r.name = 'profesor'
+            WHERE ur.user_id = $1 AND r.name = 'profesor'
             GROUP BY b.id, b.name, b.description, b.observaciones, b.is_public, b.created_at, b.image_url
             ORDER BY b.created_at DESC
         `, [profesorId]);
@@ -1421,7 +1419,7 @@ router.get('/creadores/:creadorId/bloques', authenticateToken, async (req, res) 
             JOIN user_roles ur ON b.user_role_id = ur.id
             JOIN roles r ON ur.role_id = r.id
             LEFT JOIN topic_answers ta ON b.id = ta.block_id
-            WHERE b.user_id = $1 AND r.name = 'creador'
+            WHERE ur.user_id = $1 AND r.name = 'creador'
             GROUP BY b.id, b.name, b.description, b.observaciones, b.is_public, b.created_at, b.image_url, b.user_role_id, r.name
             ORDER BY b.created_at DESC
         `, [creadorId]);
@@ -1513,9 +1511,10 @@ router.get('/bloques', authenticateToken, async (req, res) => {
                 COALESCE(ba.total_questions, 0) as total_preguntas,
                 COALESCE(ba.total_topics, 0) as num_temas
             FROM blocks b 
-            LEFT JOIN roles r ON b.user_role_id = r.id
+            JOIN user_roles ur ON b.user_role_id = ur.id
+            LEFT JOIN roles r ON ur.role_id = r.id
             LEFT JOIN block_answers ba ON b.id = ba.block_id
-            WHERE b.user_id = $1
+            WHERE ur.user_id = $1
             ORDER BY b.created_at DESC
         `, [user_id]);
         
