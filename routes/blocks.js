@@ -1483,18 +1483,22 @@ router.get('/:blockId/complete-data', authenticateToken, async (req, res) => {
 
     const block = blockResult.rows[0];
 
-    // Get question count
+    // Get question count from block_answers table
     const questionCountResult = await pool.query(`
-      SELECT COUNT(*) as total_questions
-      FROM questions
-      WHERE block_id = $1
+      SELECT COALESCE(ba.total_questions, 0) as total_questions
+      FROM block_answers ba
+      WHERE ba.block_id = $1
     `, [blockId]);
 
-    // Get topic count
-    const topicCountResult = await pool.query(`
-      SELECT COUNT(DISTINCT topic) as total_topics
-      FROM topic_answers
-      WHERE block_id = $1 AND topic IS NOT NULL AND topic != ''
+    // Get topics and questions per topic from topic_answers
+    const topicsResult = await pool.query(`
+      SELECT 
+        ta.topic,
+        COUNT(*) as question_count
+      FROM topic_answers ta
+      WHERE ta.block_id = $1 AND ta.topic IS NOT NULL AND ta.topic != ''
+      GROUP BY ta.topic
+      ORDER BY ta.topic
     `, [blockId]);
 
     // Get user count (users who have loaded this block)
@@ -1503,6 +1507,12 @@ router.get('/:blockId/complete-data', authenticateToken, async (req, res) => {
       FROM user_profiles
       WHERE loaded_blocks @> $1::jsonb
     `, [JSON.stringify([blockId])]);
+
+    // Prepare topics and questions per topic
+    const topicsData = topicsResult.rows.map(row => ({
+      topic: row.topic,
+      questionCount: parseInt(row.question_count) || 0
+    }));
 
     const completeData = {
       id: block.id,
@@ -1515,9 +1525,10 @@ router.get('/:blockId/complete-data', authenticateToken, async (req, res) => {
       creatorNickname: block.creator_nickname,
       createdWithRole: block.created_with_role,
       stats: {
-        totalQuestions: parseInt(questionCountResult.rows[0].total_questions) || 0,
-        totalTopics: parseInt(topicCountResult.rows[0].total_topics) || 0,
-        totalUsers: parseInt(userCountResult.rows[0].total_users) || 0
+        totalQuestions: parseInt(questionCountResult.rows[0]?.total_questions) || 0,
+        totalTopics: topicsData.length,
+        totalUsers: parseInt(userCountResult.rows[0].total_users) || 0,
+        topicsAndQuestions: topicsData
       }
     };
 
