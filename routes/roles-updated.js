@@ -2120,6 +2120,22 @@ router.put('/admin-assignments/update', authenticateToken, async (req, res) => {
             });
         }
         
+        // Verificar si la tabla admin_assignments existe y crear si es necesario
+        try {
+            await pool.query(`
+                CREATE TABLE IF NOT EXISTS admin_assignments (
+                    id SERIAL PRIMARY KEY,
+                    admin_id INTEGER REFERENCES users(id),
+                    assigned_user_id INTEGER REFERENCES users(id),
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW(),
+                    UNIQUE(assigned_user_id)
+                )
+            `);
+        } catch (tableError) {
+            console.warn('⚠️ Could not create admin_assignments table:', tableError.message);
+        }
+
         // Verificar si ya existe una asignación para este usuario
         const existingQuery = await pool.query(
             'SELECT id FROM admin_assignments WHERE assigned_user_id = $1',
