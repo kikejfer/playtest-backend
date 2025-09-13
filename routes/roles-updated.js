@@ -86,6 +86,11 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
             ORDER BY u.id
         `);
         
+        console.log('🔍 ADMIN-PRINCIPAL-PANEL - ADMIN USERS QUERY RESULT:', adminUsers.rows.length, 'administrators found');
+        adminUsers.rows.forEach(admin => {
+            console.log(`  - ${admin.nickname} (${admin.role_name})`);
+        });
+        
         // Contar usuarios asignados a cada administrador
         let adminUserCounts = {};
         let adminBlockCounts = {};
@@ -468,6 +473,9 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
         jugadoresAdminPrincipal.forEach(j => console.log(`    * ${j.nickname} (assigned_admin_id: ${j.assigned_admin_id})`));
         console.log(`  - jugadoresOtrosAdmins: ${jugadoresOtrosAdmins.length} items`);
         jugadoresOtrosAdmins.forEach(j => console.log(`    * ${j.nickname} (assigned_admin_id: ${j.assigned_admin_id})`));
+
+        console.log('🔍 ADMIN-PRINCIPAL-PANEL - RESPONSE availableAdmins:', adminUsers.rows.length, 'items');
+        console.log('🔍 ADMIN-PRINCIPAL-PANEL - availableAdmins content:', adminUsers.rows.map(a => `${a.nickname} (${a.role_name})`));
 
         res.json({
             adminSecundarios: adminSecundarios,
