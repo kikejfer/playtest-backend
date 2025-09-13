@@ -484,6 +484,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
             // Estadísticas corregidas para el frontend
             statistics: {
                 admins: admins,
+                soporte: soporteTecnico.length,
                 profesores: profesores_count,
                 creadores: creadores_count,
                 jugadores: jugadores_count,
@@ -2100,6 +2101,69 @@ router.get('/temas/:topicName/preguntas', authenticateToken, async (req, res) =>
         console.error('Error getting topic questions:', error);
         res.status(500).json({ 
             error: 'Error obteniendo preguntas del tema',
+            details: error.message 
+        });
+    }
+});
+
+// Endpoint para actualizar asignaciones de administrador en admin_assignments
+router.put('/admin-assignments/update', authenticateToken, async (req, res) => {
+    try {
+        const { assigned_user_id, admin_id } = req.body;
+        
+        console.log(`🔄 Updating admin assignment: user ${assigned_user_id} -> admin ${admin_id}`);
+        
+        if (!assigned_user_id) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'assigned_user_id es requerido' 
+            });
+        }
+        
+        // Verificar si ya existe una asignación para este usuario
+        const existingQuery = await pool.query(
+            'SELECT id FROM admin_assignments WHERE assigned_user_id = $1',
+            [assigned_user_id]
+        );
+        
+        if (existingQuery.rows.length > 0) {
+            // Actualizar asignación existente
+            if (admin_id === null || admin_id === undefined) {
+                // Remover asignación
+                await pool.query(
+                    'DELETE FROM admin_assignments WHERE assigned_user_id = $1',
+                    [assigned_user_id]
+                );
+                console.log(`✅ Asignación removida para usuario ${assigned_user_id}`);
+            } else {
+                // Actualizar con nuevo admin
+                await pool.query(
+                    'UPDATE admin_assignments SET admin_id = $1, updated_at = NOW() WHERE assigned_user_id = $2',
+                    [admin_id, assigned_user_id]
+                );
+                console.log(`✅ Asignación actualizada: usuario ${assigned_user_id} -> admin ${admin_id}`);
+            }
+        } else if (admin_id !== null && admin_id !== undefined) {
+            // Crear nueva asignación
+            await pool.query(
+                'INSERT INTO admin_assignments (admin_id, assigned_user_id, created_at, updated_at) VALUES ($1, $2, NOW(), NOW())',
+                [admin_id, assigned_user_id]
+            );
+            console.log(`✅ Nueva asignación creada: usuario ${assigned_user_id} -> admin ${admin_id}`);
+        }
+        
+        res.json({ 
+            success: true, 
+            message: 'Asignación actualizada exitosamente',
+            assigned_user_id,
+            admin_id 
+        });
+        
+    } catch (error) {
+        console.error('❌ Error updating admin assignment:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Error interno del servidor',
             details: error.message 
         });
     }
