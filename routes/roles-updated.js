@@ -479,7 +479,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
             jugadoresOtrosAdmins: jugadoresOtrosAdmins,
             soporteTecnico: soporteTecnico,
             usuarios: usuarios,
-            availableAdmins: allUsers.rows,
+            availableAdmins: adminUsers.rows,
             ultra_simple_version: true,
             // Estadísticas corregidas para el frontend
             statistics: {
@@ -878,6 +878,20 @@ router.get('/admin-secundario-panel', authenticateToken, async (req, res) => {
             ORDER BY u.id
         `);
         
+        // Obtener usuarios con roles administrativos
+        const adminUsers = await pool.query(`
+            SELECT DISTINCT 
+                u.id, 
+                u.nickname, 
+                COALESCE(u.email, 'Sin email') as email,
+                r.name as role_name
+            FROM users u
+            INNER JOIN user_roles ur ON u.id = ur.user_id
+            INNER JOIN roles r ON ur.role_id = r.id
+            WHERE r.name IN ('administrador_principal', 'administrador_secundario')
+            ORDER BY u.id
+        `);
+        
         // Obtener usuarios que tienen roles relevantes (excluyendo administradores)
         const usersWithRolesQuery = await pool.query(`
             SELECT DISTINCT u.id, u.nickname, COALESCE(u.email, 'Sin email') as email, COALESCE(u.first_name, '') as first_name
@@ -1147,7 +1161,7 @@ router.get('/admin-secundario-panel', authenticateToken, async (req, res) => {
             creadores: creadoresAsignadosQuery.rows,
             jugadores: jugadoresAsignadosQuery.rows,
             usuarios: [], // PAS no maneja usuarios genéricos
-            availableAdmins: allUsers.rows,
+            availableAdmins: adminUsers.rows,
             admin_secundario_version: true,
             statistics: {
                 profesores: profesores_count,
