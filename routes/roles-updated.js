@@ -725,6 +725,26 @@ router.get('/administrados/:userId/caracteristicas', authenticateToken, async (r
         
         console.log(`🔍 CARACTERISTICAS DEBUG - Usuario: ${userId}, Rol: ${rol}, targetRoleId: ${targetRoleId} (ORIGINAL MAPPING)`);
         
+        // DIAGNÓSTICO: Verificar qué roles tiene realmente este usuario en la BD
+        const userRolesVerification = await pool.query(`
+            SELECT ur.role_id, r.name as role_name
+            FROM user_roles ur 
+            JOIN roles r ON ur.role_id = r.id 
+            WHERE ur.user_id = $1
+            ORDER BY ur.role_id
+        `, [userId]);
+        
+        console.log(`🔍 DIAGNÓSTICO USER ROLES - Usuario ${userId} tiene roles:`, 
+            userRolesVerification.rows.map(row => `${row.role_id}:${row.role_name}`).join(', '));
+        
+        // DIAGNÓSTICO: Verificar tabla roles completa
+        const allRolesVerification = await pool.query(`
+            SELECT id, name FROM roles WHERE id IN (3, 4) ORDER BY id
+        `);
+        
+        console.log(`🔍 DIAGNÓSTICO ROLES TABLE - IDs 3 y 4:`, 
+            allRolesVerification.rows.map(row => `${row.id}:${row.name}`).join(', '));
+        
         // Información básica del usuario
         const userQuery = await pool.query(`
             SELECT id, nickname, email, first_name, last_name
