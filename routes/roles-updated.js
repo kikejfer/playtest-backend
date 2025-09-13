@@ -219,7 +219,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
             FROM users u
             INNER JOIN user_roles ur ON u.id = ur.user_id
             INNER JOIN roles r ON ur.role_id = r.id
-            WHERE r.name IN ('profesor', 'creador', 'administrador_principal', 'administrador_secundario', 'jugador') 
+            WHERE r.name IN ('profesor', 'creador', 'administrador_principal', 'administrador_secundario', 'jugador', 'soporte_tecnico') 
             OR r.id = 5
             ORDER BY u.id
         `);
@@ -241,6 +241,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
         const profesores = [];
         const creadores = [];
         const jugadores = [];
+        const soporteTecnico = [];
         
         // Procesar TODOS los usuarios con roles según TODOS sus roles
         for (const user of usersWithRoles) {
@@ -319,6 +320,14 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
                             bloques: 0
                         });
                     }
+                }
+                
+                if (userRoles.includes('soporte_tecnico')) {
+                    console.log(`🔧 Adding ${user.nickname} to soporte técnico list (isAdmin: ${isAdmin})`);
+                    soporteTecnico.push({ 
+                        ...baseUserData, 
+                        role_name: 'soporte_tecnico'
+                    });
                 }
                 
             } catch (e) {
@@ -468,6 +477,7 @@ router.get('/admin-principal-panel', authenticateToken, async (req, res) => {
             jugadores: jugadores, // Mantener para compatibilidad
             jugadoresAdminPrincipal: jugadoresAdminPrincipal,
             jugadoresOtrosAdmins: jugadoresOtrosAdmins,
+            soporteTecnico: soporteTecnico,
             usuarios: usuarios,
             availableAdmins: allUsers.rows,
             ultra_simple_version: true,
