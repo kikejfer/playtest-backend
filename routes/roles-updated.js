@@ -1597,7 +1597,7 @@ router.get('/bloques/:blockId/temas/:topic/preguntas', authenticateToken, async 
         const preguntasQuery = await pool.query(`
             SELECT 
                 q.id,
-                q.text_questions as question,
+                q.text_question as question,
                 q.block_id,
                 q.topic
             FROM questions q
