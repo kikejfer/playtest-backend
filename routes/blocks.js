@@ -1490,14 +1490,13 @@ router.get('/:blockId/complete-data', authenticateToken, async (req, res) => {
       WHERE ba.block_id = $1
     `, [blockId]);
 
-    // Get topics and questions per topic from topic_answers
+    // Get topics and questions per topic from topic_answers (using total_questions column)
     const topicsResult = await pool.query(`
       SELECT 
         ta.topic,
-        COUNT(*) as question_count
+        ta.total_questions as question_count
       FROM topic_answers ta
       WHERE ta.block_id = $1 AND ta.topic IS NOT NULL AND ta.topic != ''
-      GROUP BY ta.topic
       ORDER BY ta.topic
     `, [blockId]);
 
