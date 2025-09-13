@@ -713,17 +713,17 @@ router.get('/administrados/:userId/caracteristicas', authenticateToken, async (r
         
         console.log(`📊 Calculando características de administrado ${userId} con rol ${rol}`);
         
-        // Determinar role_id basado en el parámetro rol
+        // Determinar role_id basado en el parámetro rol  
         let targetRoleId;
         if (rol === 'profesor') {
-            targetRoleId = 4; // TEMP FIX: inversión detectada por usuario
+            targetRoleId = 3; // REVERTED: características usa mapeo original
         } else if (rol === 'creador') {
-            targetRoleId = 3; // TEMP FIX: inversión detectada por usuario
+            targetRoleId = 4; // REVERTED: características usa mapeo original
         } else {
             return res.status(400).json({ error: 'Rol inválido. Use profesor o creador.' });
         }
         
-        console.log(`🔍 CARACTERISTICAS DEBUG - Usuario: ${userId}, Rol: ${rol}, targetRoleId: ${targetRoleId}`);
+        console.log(`🔍 CARACTERISTICAS DEBUG - Usuario: ${userId}, Rol: ${rol}, targetRoleId: ${targetRoleId} (ORIGINAL MAPPING)`);
         
         // Información básica del usuario
         const userQuery = await pool.query(`
