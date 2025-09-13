@@ -618,9 +618,9 @@ router.get('/administrados/:rol', authenticateToken, async (req, res) => {
         // Determinar role_id basado en el parámetro
         let targetRoleId;
         if (rol === 'profesores') {
-            targetRoleId = 3; // profesor
+            targetRoleId = 4; // TEMP FIX: inversión detectada por usuario
         } else if (rol === 'creadores') {
-            targetRoleId = 4; // creador
+            targetRoleId = 3; // TEMP FIX: inversión detectada por usuario
         } else {
             return res.status(400).json({ error: 'Rol inválido. Use profesores o creadores.' });
         }
@@ -669,6 +669,12 @@ router.get('/administrados/:rol', authenticateToken, async (req, res) => {
         
         const result = await pool.query(administradosQuery, params);
         
+        console.log(`🔍 ROLE DEBUG - Solicitado: ${rol} (targetRoleId: ${targetRoleId})`);
+        console.log(`🔍 ROLE DEBUG - Usuarios encontrados: ${result.rows.length}`);
+        result.rows.forEach(user => {
+            console.log(`   - Usuario ${user.nickname} (ID: ${user.id})`);
+        });
+        
         // Obtener administradores disponibles (solo para PAP)
         let availableAdmins = [];
         if (isAdminPrincipal) {
@@ -710,12 +716,14 @@ router.get('/administrados/:userId/caracteristicas', authenticateToken, async (r
         // Determinar role_id basado en el parámetro rol
         let targetRoleId;
         if (rol === 'profesor') {
-            targetRoleId = 3; // profesor
+            targetRoleId = 4; // TEMP FIX: inversión detectada por usuario
         } else if (rol === 'creador') {
-            targetRoleId = 4; // creador
+            targetRoleId = 3; // TEMP FIX: inversión detectada por usuario
         } else {
             return res.status(400).json({ error: 'Rol inválido. Use profesor o creador.' });
         }
+        
+        console.log(`🔍 CARACTERISTICAS DEBUG - Usuario: ${userId}, Rol: ${rol}, targetRoleId: ${targetRoleId}`);
         
         // Información básica del usuario
         const userQuery = await pool.query(`
@@ -1493,12 +1501,14 @@ router.get('/administrados/:userId/bloques', authenticateToken, async (req, res)
         // Determinar role_id basado en el parámetro rol
         let targetRoleId;
         if (rol === 'profesor') {
-            targetRoleId = 3; // profesor
+            targetRoleId = 4; // TEMP FIX: inversión detectada por usuario
         } else if (rol === 'creador') {
-            targetRoleId = 4; // creador
+            targetRoleId = 3; // TEMP FIX: inversión detectada por usuario
         } else {
             return res.status(400).json({ error: 'Rol inválido. Use profesor o creador.' });
         }
+        
+        console.log(`🔍 BLOQUES DEBUG - Usuario: ${userId}, Rol: ${rol}, targetRoleId: ${targetRoleId}`);
         
         // Bloques filtrados de tabla blocks creados por el usuario con el rol correspondiente
         const blocksQuery = await pool.query(`
