@@ -1580,6 +1580,9 @@ router.get('/bloques/:blockId/temas/:topic/preguntas', authenticateToken, async 
         
         console.log(`❓ Obteniendo preguntas del tema "${topic}" del bloque ${blockId} desde tabla questions`);
         
+        // DEBUG: Verificar parámetros
+        console.log(`🔍 PREGUNTAS DEBUG - blockId: ${blockId} (type: ${typeof blockId}), topic: "${topic}" (type: ${typeof topic})`);
+        
         // Las preguntas son los registros text_questions que se obtienen filtrando questions con block_id y topic
         const preguntasQuery = await pool.query(`
             SELECT 
@@ -1591,6 +1594,20 @@ router.get('/bloques/:blockId/temas/:topic/preguntas', authenticateToken, async 
             WHERE q.block_id = $1 AND q.topic = $2
             ORDER BY q.id
         `, [blockId, topic]);
+        
+        // DEBUG: Log del resultado de la query
+        console.log(`🔍 PREGUNTAS QUERY RESULT - rows: ${preguntasQuery.rows.length}, rowCount: ${preguntasQuery.rowCount}`);
+        if (preguntasQuery.rows.length > 0) {
+            console.log(`🔍 PREGUNTAS SAMPLE:`, preguntasQuery.rows[0]);
+        } else {
+            // Verificar si existen preguntas para este bloque en general
+            const allBlockQuestions = await pool.query(`
+                SELECT COUNT(*) as total, array_agg(DISTINCT topic) as topics  
+                FROM questions 
+                WHERE block_id = $1
+            `, [blockId]);
+            console.log(`🔍 PREGUNTAS BLOCK VERIFICATION - Total questions in block ${blockId}:`, allBlockQuestions.rows[0]);
+        }
         
         const preguntas = preguntasQuery.rows;
         
