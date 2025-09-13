@@ -618,9 +618,9 @@ router.get('/administrados/:rol', authenticateToken, async (req, res) => {
         // Determinar role_id basado en el parámetro
         let targetRoleId;
         if (rol === 'profesores') {
-            targetRoleId = 4; // TEMP FIX: inversión detectada por usuario
+            targetRoleId = 3; // profesor
         } else if (rol === 'creadores') {
-            targetRoleId = 3; // TEMP FIX: inversión detectada por usuario
+            targetRoleId = 4; // creador
         } else {
             return res.status(400).json({ error: 'Rol inválido. Use profesores o creadores.' });
         }
@@ -716,9 +716,9 @@ router.get('/administrados/:userId/caracteristicas', authenticateToken, async (r
         // Determinar role_id basado en el parámetro rol  
         let targetRoleId;
         if (rol === 'profesor') {
-            targetRoleId = 3; // REVERTED: características usa mapeo original
+            targetRoleId = 3; // profesor
         } else if (rol === 'creador') {
-            targetRoleId = 4; // REVERTED: características usa mapeo original
+            targetRoleId = 4; // creador
         } else {
             return res.status(400).json({ error: 'Rol inválido. Use profesor o creador.' });
         }
@@ -1501,9 +1501,9 @@ router.get('/administrados/:userId/bloques', authenticateToken, async (req, res)
         // Determinar role_id basado en el parámetro rol
         let targetRoleId;
         if (rol === 'profesor') {
-            targetRoleId = 4; // TEMP FIX: inversión detectada por usuario
+            targetRoleId = 3; // profesor
         } else if (rol === 'creador') {
-            targetRoleId = 3; // TEMP FIX: inversión detectada por usuario
+            targetRoleId = 4; // creador
         } else {
             return res.status(400).json({ error: 'Rol inválido. Use profesor o creador.' });
         }
