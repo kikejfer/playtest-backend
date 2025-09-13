@@ -1457,4 +1457,132 @@ router.get('/metadata', async (req, res) => {
   }
 });
 
+// Obtener datos completos de un bloque
+router.get('/:blockId/complete-data', authenticateToken, async (req, res) => {
+  try {
+    const blockId = parseInt(req.params.blockId);
+    console.log('🔍 Getting complete data for block:', blockId, 'user:', req.user.id);
+
+    // Get block info
+    const blockResult = await pool.query(`
+      SELECT 
+        b.id, b.name, b.description, b.observaciones, b.is_public, b.created_at,
+        u.nickname as creator_nickname,
+        u.id as creator_id,
+        r.name as created_with_role
+      FROM blocks b
+      LEFT JOIN user_roles ur ON b.user_role_id = ur.id
+      LEFT JOIN users u ON ur.user_id = u.id
+      LEFT JOIN roles r ON ur.role_id = r.id
+      WHERE b.id = $1
+    `, [blockId]);
+
+    if (blockResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Block not found' });
+    }
+
+    const block = blockResult.rows[0];
+
+    // Get question count
+    const questionCountResult = await pool.query(`
+      SELECT COUNT(*) as total_questions
+      FROM questions
+      WHERE block_id = $1
+    `, [blockId]);
+
+    // Get topic count
+    const topicCountResult = await pool.query(`
+      SELECT COUNT(DISTINCT topic) as total_topics
+      FROM topic_answers
+      WHERE block_id = $1 AND topic IS NOT NULL AND topic != ''
+    `, [blockId]);
+
+    // Get user count (users who have loaded this block)
+    const userCountResult = await pool.query(`
+      SELECT COUNT(*) as total_users
+      FROM user_profiles
+      WHERE loaded_blocks @> $1::jsonb
+    `, [JSON.stringify([blockId])]);
+
+    const completeData = {
+      id: block.id,
+      name: block.name,
+      description: block.description,
+      observaciones: block.observaciones,
+      isPublic: block.is_public,
+      createdAt: block.created_at,
+      creatorId: block.creator_id,
+      creatorNickname: block.creator_nickname,
+      createdWithRole: block.created_with_role,
+      stats: {
+        totalQuestions: parseInt(questionCountResult.rows[0].total_questions) || 0,
+        totalTopics: parseInt(topicCountResult.rows[0].total_topics) || 0,
+        totalUsers: parseInt(userCountResult.rows[0].total_users) || 0
+      }
+    };
+
+    console.log('✅ Returning complete data for block:', blockId);
+    res.json(completeData);
+
+  } catch (error) {
+    console.error('❌ Error getting complete block data:', error);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message,
+      endpoint: '/blocks/:blockId/complete-data'
+    });
+  }
+});
+
+// Obtener todas las preguntas de un bloque
+router.get('/:blockId/questions', authenticateToken, async (req, res) => {
+  try {
+    const blockId = parseInt(req.params.blockId);
+    const limit = parseInt(req.query.limit) || 100;
+    console.log('🔍 Getting questions for block:', blockId, 'limit:', limit, 'user:', req.user.id);
+
+    // Get all questions for this block
+    const questionsResult = await pool.query(`
+      SELECT q.id, q.text_question, q.topic, q.block_id, q.difficulty, q.explanation,
+        json_agg(
+          json_build_object(
+            'id', a.id,
+            'answerText', a.answer_text,
+            'isCorrect', a.is_correct
+          )
+        ) as answers
+      FROM questions q
+      LEFT JOIN answers a ON q.id = a.question_id
+      WHERE q.block_id = $1
+      GROUP BY q.id, q.text_question, q.topic, q.block_id, q.difficulty, q.explanation
+      ORDER BY q.created_at
+      LIMIT $2
+    `, [blockId, limit]);
+
+    const questions = questionsResult.rows.map(q => ({
+      id: q.id,
+      textoPregunta: q.text_question,
+      tema: q.topic,
+      bloqueId: q.block_id,
+      difficulty: q.difficulty,
+      explicacionRespuesta: q.explanation || null,
+      respuestas: q.answers.filter(a => a.id !== null).map(a => ({
+        textoRespuesta: a.answerText,
+        esCorrecta: a.isCorrect
+      }))
+    }));
+
+    console.log('✅ Returning', questions.length, 'questions for block:', blockId);
+    res.json(questions);
+
+  } catch (error) {
+    console.error('❌ Error getting block questions:', error);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message,
+      endpoint: '/blocks/:blockId/questions'
+    });
+  }
+});
+
 module.exports = router;
