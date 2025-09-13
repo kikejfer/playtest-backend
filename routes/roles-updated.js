@@ -1644,6 +1644,127 @@ router.get('/bloques/:blockId/temas/:topic/preguntas', authenticateToken, async 
     }
 });
 
+// Endpoints para el editor de bloques (bloques-creados-component.js)
+
+// Obtener datos completos de un bloque
+router.get('/blocks/:blockId/complete-data', authenticateToken, async (req, res) => {
+    try {
+        const { blockId } = req.params;
+        
+        console.log(`📦 Obteniendo datos completos del bloque ${blockId}`);
+        
+        // Obtener información básica del bloque
+        const blockQuery = await pool.query(`
+            SELECT 
+                b.id,
+                b.name,
+                b.description,
+                b.created_at,
+                b.updated_at,
+                b.user_role_id,
+                u.nickname as creator_nickname,
+                r.name as creator_role
+            FROM blocks b
+            LEFT JOIN user_roles ur ON b.user_role_id = ur.id
+            LEFT JOIN users u ON ur.user_id = u.id
+            LEFT JOIN roles r ON ur.role_id = r.id
+            WHERE b.id = $1
+        `, [blockId]);
+        
+        if (blockQuery.rows.length === 0) {
+            return res.status(404).json({ error: 'Bloque no encontrado' });
+        }
+        
+        const block = blockQuery.rows[0];
+        
+        // Contar temas únicos
+        const topicsQuery = await pool.query(`
+            SELECT COUNT(DISTINCT topic) as total_topics
+            FROM topic_answers
+            WHERE block_id = $1 AND topic IS NOT NULL AND topic != ''
+        `, [blockId]);
+        
+        // Contar preguntas totales
+        const questionsQuery = await pool.query(`
+            SELECT COUNT(*) as total_questions
+            FROM questions
+            WHERE block_id = $1
+        `, [blockId]);
+        
+        // Contar usuarios que han cargado el bloque
+        const usersQuery = await pool.query(`
+            SELECT COUNT(DISTINCT user_id) as total_users
+            FROM user_loaded_blocks
+            WHERE block_id = $1
+        `, [blockId]);
+        
+        const completeData = {
+            ...block,
+            statistics: {
+                total_topics: parseInt(topicsQuery.rows[0].total_topics) || 0,
+                total_questions: parseInt(questionsQuery.rows[0].total_questions) || 0,
+                total_users: parseInt(usersQuery.rows[0].total_users) || 0
+            }
+        };
+        
+        console.log(`📦 Datos completos del bloque ${blockId}:`, completeData.statistics);
+        
+        res.json(completeData);
+        
+    } catch (error) {
+        console.error('Error obteniendo datos completos del bloque:', error);
+        res.status(500).json({ 
+            error: 'Error obteniendo datos del bloque', 
+            details: error.message 
+        });
+    }
+});
+
+// Obtener todas las preguntas de un bloque
+router.get('/blocks/:blockId/questions', authenticateToken, async (req, res) => {
+    try {
+        const { blockId } = req.params;
+        const { limit } = req.query;
+        
+        console.log(`❓ Obteniendo preguntas del bloque ${blockId}${limit ? ` (limit: ${limit})` : ''}`);
+        
+        // Query base para obtener preguntas
+        let questionsQuery = `
+            SELECT 
+                q.id,
+                q.text_question as question,
+                q.block_id,
+                q.topic,
+                q.created_at
+            FROM questions q
+            WHERE q.block_id = $1
+            ORDER BY q.topic, q.id
+        `;
+        
+        const params = [blockId];
+        
+        // Añadir LIMIT si se especifica
+        if (limit && !isNaN(limit)) {
+            questionsQuery += ` LIMIT $2`;
+            params.push(parseInt(limit));
+        }
+        
+        const result = await pool.query(questionsQuery, params);
+        const questions = result.rows;
+        
+        console.log(`❓ Encontradas ${questions.length} preguntas para bloque ${blockId}`);
+        
+        res.json(questions);
+        
+    } catch (error) {
+        console.error('Error obteniendo preguntas del bloque:', error);
+        res.status(500).json({ 
+            error: 'Error obteniendo preguntas del bloque', 
+            details: error.message 
+        });
+    }
+});
+
 // Obtener bloques de un profesor/creador
 router.get('/profesores/:profesorId/bloques', authenticateToken, async (req, res) => {
     try {
