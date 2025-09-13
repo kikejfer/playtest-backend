@@ -739,18 +739,24 @@ router.get('/administrados/:userId/caracteristicas', authenticateToken, async (r
         `, [userId, targetRoleId]);
         
         const totalBlocks = parseInt(blocksQuery.rows[0].total_blocks) || 0;
+        console.log(`📊 Usuario ${userId} rol ${targetRoleId}: ${totalBlocks} bloques encontrados`);
         
-        // Temas totales (de tabla topic_answers contando registros por block_id)
+        // Temas totales (suma de temas por bloque, igual que Nivel 2)
         const topicsQuery = await pool.query(`
-            SELECT COUNT(DISTINCT ta.topic) as total_topics
-            FROM blocks b
-            JOIN user_roles ur ON b.user_role_id = ur.id
-            LEFT JOIN topic_answers ta ON b.id = ta.block_id
-            WHERE ur.user_id = $1 AND ur.role_id = $2 
-            AND ta.topic IS NOT NULL AND ta.topic != ''
+            SELECT COALESCE(SUM(block_topics.topic_count), 0) as total_topics
+            FROM (
+                SELECT b.id, COUNT(DISTINCT ta.topic) as topic_count
+                FROM blocks b
+                JOIN user_roles ur ON b.user_role_id = ur.id
+                LEFT JOIN topic_answers ta ON b.id = ta.block_id 
+                AND ta.topic IS NOT NULL AND ta.topic != ''
+                WHERE ur.user_id = $1 AND ur.role_id = $2
+                GROUP BY b.id
+            ) block_topics
         `, [userId, targetRoleId]);
         
         const totalTopics = parseInt(topicsQuery.rows[0].total_topics) || 0;
+        console.log(`📊 Usuario ${userId} rol ${targetRoleId}: ${totalTopics} temas encontrados`);
         
         // Preguntas totales (total_questions de tabla block_answers)
         const questionsQuery = await pool.query(`
@@ -762,6 +768,7 @@ router.get('/administrados/:userId/caracteristicas', authenticateToken, async (r
         `, [userId, targetRoleId]);
         
         const totalQuestions = parseInt(questionsQuery.rows[0].total_questions) || 0;
+        console.log(`📊 Usuario ${userId} rol ${targetRoleId}: ${totalQuestions} preguntas encontradas`);
         
         // Alumnos/Estudiantes (número de registros de user_loaded_blocks)
         const usersQuery = await pool.query(`
