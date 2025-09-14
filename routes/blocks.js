@@ -310,6 +310,119 @@ router.get('/loaded', authenticateToken, async (req, res) => {
   }
 });
 
+// Get loaded blocks with detailed stats (enhanced version for PJG)
+router.get('/loaded-stats', authenticateToken, async (req, res) => {
+  try {
+    console.log('🔍 /blocks/loaded-stats endpoint called');
+    console.log('🔍 User ID:', req.user.id);
+    
+    // Get user profile to see which blocks are loaded
+    const userResult = await pool.query(
+      'SELECT loaded_blocks FROM user_profiles WHERE user_id = $1',
+      [req.user.id]
+    );
+    
+    const loadedBlockIds = userResult.rows[0]?.loaded_blocks || [];
+    console.log('🔍 Loaded block IDs:', loadedBlockIds);
+    
+    if (loadedBlockIds.length === 0) {
+      return res.json([]);
+    }
+    
+    // Get the actual blocks that are loaded with enhanced stats
+    const placeholders = loadedBlockIds.map((_, index) => `$${index + 2}`).join(',');
+    const blocksResult = await pool.query(`
+      SELECT b.id, b.name, b.description, b.observaciones, b.user_role_id, b.is_public, b.created_at, b.image_url,
+        u.nickname as creator_nickname,
+        u.id as creator_id,
+        r.name as created_with_role,
+        COALESCE(ba.total_questions, 0) as question_count,
+        COALESCE(bt.total_topics, 0) as topic_count,
+        up_load.created_at as loaded_at
+      FROM blocks b
+      LEFT JOIN user_roles ur ON b.user_role_id = ur.id
+      LEFT JOIN users u ON ur.user_id = u.id
+      LEFT JOIN roles r ON ur.role_id = r.id
+      LEFT JOIN block_answers ba ON b.id = ba.block_id
+      LEFT JOIN (
+        SELECT block_id, COUNT(DISTINCT topic) as total_topics
+        FROM questions 
+        WHERE block_id IN (${placeholders})
+        GROUP BY block_id
+      ) bt ON b.id = bt.block_id
+      LEFT JOIN user_profiles up_load ON up_load.user_id = $1
+      WHERE b.id IN (${placeholders})
+      ORDER BY b.created_at DESC
+    `, [req.user.id, ...loadedBlockIds]);
+
+    console.log('🔍 Found loaded blocks with stats:', blocksResult.rows.length);
+
+    const blocks = [];
+    
+    for (const block of blocksResult.rows) {
+      // Get questions for this block with enhanced data
+      const questionsResult = await pool.query(`
+        SELECT q.id, q.text_question, q.topic, q.block_id, q.difficulty, q.explanation,
+               COALESCE(a.answer_a, '') as answer_a,
+               COALESCE(a.answer_b, '') as answer_b,
+               COALESCE(a.answer_c, '') as answer_c,
+               COALESCE(a.answer_d, '') as answer_d,
+               COALESCE(a.correct_answer, '') as correct_answer
+        FROM questions q
+        LEFT JOIN answers a ON q.id = a.question_id
+        WHERE q.block_id = $1
+        ORDER BY q.id
+      `, [block.id]);
+
+      const questions = questionsResult.rows.map(question => ({
+        id: question.id,
+        text_question: question.text_question,
+        topic: question.topic,
+        difficulty: question.difficulty,
+        explanation: question.explanation,
+        answers: {
+          A: question.answer_a,
+          B: question.answer_b,
+          C: question.answer_c,
+          D: question.answer_d
+        },
+        correct_answer: question.correct_answer
+      }));
+
+      blocks.push({
+        id: block.id,
+        name: block.name,
+        description: block.description,
+        observaciones: block.observaciones,
+        is_public: block.is_public,
+        created_at: block.created_at,
+        image_url: block.image_url,
+        creator_nickname: block.creator_nickname,
+        creator_id: block.creator_id,
+        created_with_role: block.created_with_role,
+        questions: questions,
+        stats: {
+          totalQuestions: parseInt(block.question_count) || 0,
+          totalTopics: parseInt(block.topic_count) || 0,
+          loadedAt: block.loaded_at
+        }
+      });
+    }
+    
+    console.log('🔍 Returning', blocks.length, 'loaded blocks with stats');
+    res.json(blocks);
+  } catch (error) {
+    console.error('❌ Error fetching loaded blocks with stats:', error);
+    console.error('❌ Error details:', error.message);
+    console.error('❌ Error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message,
+      endpoint: '/blocks/loaded-stats'
+    });
+  }
+});
+
 // Get created blocks (blocks created by the current user)
 router.get('/created', authenticateToken, async (req, res) => {
   try {
@@ -488,6 +601,95 @@ router.delete('/:id/load', authenticateToken, async (req, res) => {
     res.json({ message: 'Block unloaded successfully' });
   } catch (error) {
     console.error('Error unloading block:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Alternative load endpoint for compatibility
+router.post('/:id/load-block', authenticateToken, async (req, res) => {
+  try {
+    const blockId = parseInt(req.params.id);
+    
+    // Check if block exists and is accessible (public OR owned by user)
+    const blockResult = await pool.query(
+      'SELECT b.id, ur.user_id as creator_id, b.is_public FROM blocks b LEFT JOIN user_roles ur ON b.user_role_id = ur.id WHERE b.id = $1 AND (b.is_public = true OR ur.user_id = $2)',
+      [blockId, req.user.id]
+    );
+    
+    if (blockResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Block not found or not accessible' });
+    }
+
+    // Get current loaded blocks
+    const userResult = await pool.query(
+      'SELECT loaded_blocks FROM user_profiles WHERE user_id = $1',
+      [req.user.id]
+    );
+    
+    let loadedBlocks = userResult.rows[0]?.loaded_blocks || [];
+    
+    // Ensure it's an array (sometimes stored as string/other format)
+    if (!Array.isArray(loadedBlocks)) {
+      console.warn('⚠️ loaded_blocks is not an array, converting:', loadedBlocks);
+      loadedBlocks = [];
+    }
+
+    // Check if already loaded
+    if (loadedBlocks.includes(blockId)) {
+      return res.status(409).json({ error: 'Block already loaded' });
+    }
+
+    // Add block to loaded blocks
+    loadedBlocks.push(blockId);
+    
+    // Update user profile
+    await pool.query(`
+      INSERT INTO user_profiles (user_id, loaded_blocks, stats, answer_history, preferences) 
+      VALUES ($1, $2::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb) 
+      ON CONFLICT (user_id) 
+      DO UPDATE SET loaded_blocks = $2::jsonb, updated_at = CURRENT_TIMESTAMP
+    `, [req.user.id, JSON.stringify(loadedBlocks)]);
+
+    res.json({ message: 'Block loaded successfully' });
+  } catch (error) {
+    console.error('Error loading block via load-block endpoint:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Alternative unload endpoint for compatibility
+router.delete('/:id/unload', authenticateToken, async (req, res) => {
+  try {
+    const blockId = parseInt(req.params.id);
+    
+    // Get current loaded blocks
+    const userResult = await pool.query(
+      'SELECT loaded_blocks FROM user_profiles WHERE user_id = $1',
+      [req.user.id]
+    );
+    
+    let loadedBlocks = userResult.rows[0]?.loaded_blocks || [];
+    
+    // Ensure it's an array
+    if (!Array.isArray(loadedBlocks)) {
+      console.warn('⚠️ loaded_blocks is not an array, converting:', loadedBlocks);
+      loadedBlocks = [];
+    }
+
+    // Remove block from loaded blocks
+    loadedBlocks = loadedBlocks.filter(id => parseInt(id) !== blockId);
+    
+    // Update user profile
+    await pool.query(`
+      INSERT INTO user_profiles (user_id, loaded_blocks, stats, answer_history, preferences) 
+      VALUES ($1, $2::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb) 
+      ON CONFLICT (user_id) 
+      DO UPDATE SET loaded_blocks = $2::jsonb, updated_at = CURRENT_TIMESTAMP
+    `, [req.user.id, JSON.stringify(loadedBlocks)]);
+
+    res.json({ message: 'Block unloaded successfully' });
+  } catch (error) {
+    console.error('Error unloading block via unload endpoint:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
