@@ -313,16 +313,14 @@ router.get('/loaded', authenticateToken, async (req, res) => {
 // Get loaded blocks with detailed stats (enhanced version for PJG)
 router.get('/loaded-stats', authenticateToken, async (req, res) => {
   try {
-    console.log('🔍 /blocks/loaded-stats endpoint called - DEBUG VERSION');
+    console.log('🔍 /blocks/loaded-stats endpoint called');
     console.log('🔍 User ID:', req.user.id);
     
-    // Step 1: Test basic query
-    console.log('🔍 Step 1: Testing basic user profile query...');
+    // Get user profile to see which blocks are loaded
     const userResult = await pool.query(
       'SELECT loaded_blocks FROM user_profiles WHERE user_id = $1',
       [req.user.id]
     );
-    console.log('✅ Step 1: User profile query successful');
     
     const loadedBlockIds = userResult.rows[0]?.loaded_blocks || [];
     console.log('🔍 Loaded block IDs:', loadedBlockIds);
@@ -332,59 +330,119 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
       return res.json([]);
     }
     
-    // Step 2: Test block query with minimal data
-    console.log('🔍 Step 2: Testing basic blocks query...');
     const placeholders = loadedBlockIds.map((_, index) => `$${index + 2}`).join(',');
+    
     const blocksResult = await pool.query(`
-      SELECT b.id, b.name
+      SELECT b.id, b.name, b.description, b.observaciones, b.user_role_id, b.is_public, b.created_at, b.image_url,
+        u.nickname as creator_nickname,
+        u.id as creator_id,
+        r.name as created_with_role,
+        COALESCE(ba.total_questions, 0) as question_count
       FROM blocks b
+      LEFT JOIN user_roles ur ON b.user_role_id = ur.id
+      LEFT JOIN users u ON ur.user_id = u.id
+      LEFT JOIN roles r ON ur.role_id = r.id
+      LEFT JOIN block_answers ba ON b.id = ba.block_id
       WHERE b.id IN (${placeholders})
       ORDER BY b.created_at DESC
-      LIMIT 1
     `, [req.user.id, ...loadedBlockIds]);
-    console.log('✅ Step 2: Basic blocks query successful, found:', blocksResult.rows.length);
+
+    console.log('🔍 Found blocks from query:', blocksResult.rows.length);
+
+    const blocks = [];
     
-    if (blocksResult.rows.length === 0) {
-      console.log('✅ No blocks found, returning empty array');
-      return res.json([]);
+    for (const block of blocksResult.rows) {
+      console.log(`🔍 Processing block ${block.id}: ${block.name}`);
+      
+      // Get questions for this block
+      const questionsResult = await pool.query(`
+        SELECT q.id, q.text_question, q.topic, q.block_id, q.difficulty, q.explanation,
+               COALESCE(a.answer_a, '') as answer_a,
+               COALESCE(a.answer_b, '') as answer_b,
+               COALESCE(a.answer_c, '') as answer_c,
+               COALESCE(a.answer_d, '') as answer_d,
+               COALESCE(a.correct_answer, '') as correct_answer
+        FROM questions q
+        LEFT JOIN answers a ON q.id = a.question_id
+        WHERE q.block_id = $1
+        ORDER BY q.id
+      `, [block.id]);
+
+      console.log(`🔍 Block ${block.id} has ${questionsResult.rows.length} questions`);
+
+      const questions = questionsResult.rows.map(question => ({
+        id: question.id,
+        text_question: question.text_question,
+        topic: question.topic,
+        difficulty: question.difficulty,
+        explanation: question.explanation,
+        answers: {
+          A: question.answer_a,
+          B: question.answer_b,
+          C: question.answer_c,
+          D: question.answer_d
+        },
+        correct_answer: question.correct_answer
+      }));
+
+      // Calculate statistics using correct database tables as specified:
+      
+      // 1. Total topics: COUNT from topic_answers table filtered by block_id
+      const topicCountResult = await pool.query(
+        'SELECT COUNT(*) as topic_count FROM topic_answers WHERE block_id = $1',
+        [block.id]
+      );
+      const totalTopics = parseInt(topicCountResult.rows[0]?.topic_count) || 0;
+      console.log(`🔍 Block ${block.id} has ${totalTopics} topics from topic_answers table`);
+      
+      // 2. Total users: COUNT from user_loaded_blocks table filtered by block_id
+      const userCountResult = await pool.query(
+        'SELECT COUNT(*) as user_count FROM user_loaded_blocks WHERE block_id = $1',
+        [block.id]
+      );
+      const totalUsers = parseInt(userCountResult.rows[0]?.user_count) || 0;
+      console.log(`🔍 Block ${block.id} has been loaded by ${totalUsers} users`);
+      
+      // 3. Load date: loaded_at from user_loaded_blocks filtered by user_id and block_id
+      const loadDateResult = await pool.query(
+        'SELECT loaded_at FROM user_loaded_blocks WHERE user_id = $1 AND block_id = $2',
+        [req.user.id, block.id]
+      );
+      const loadedAt = loadDateResult.rows[0]?.loaded_at || new Date().toISOString();
+      console.log(`🔍 Block ${block.id} was loaded by user ${req.user.id} at:`, loadedAt);
+      
+      blocks.push({
+        id: block.id,
+        name: block.name,
+        description: block.description,
+        observaciones: block.observaciones,
+        is_public: block.is_public,
+        created_at: block.created_at,
+        image_url: block.image_url,
+        creator_nickname: block.creator_nickname,
+        creator_id: block.creator_id,
+        created_with_role: block.created_with_role,
+        questions: questions,
+        stats: {
+          totalQuestions: parseInt(block.question_count) || questions.length,
+          totalTopics: totalTopics,
+          totalUsers: totalUsers,
+          loadedAt: loadedAt
+        }
+      });
     }
     
-    // Step 3: Return minimal response with mock stats
-    console.log('🔍 Step 3: Building minimal response...');
-    const block = blocksResult.rows[0];
-    const response = [{
-      id: block.id,
-      name: block.name,
-      description: '',
-      observaciones: '',
-      is_public: false,
-      created_at: new Date().toISOString(),
-      image_url: '',
-      creator_nickname: 'Test',
-      creator_id: 1,
-      created_with_role: 'Test',
-      questions: [],
-      stats: {
-        totalQuestions: 0,
-        totalTopics: 1,
-        totalUsers: 1,
-        loadedAt: new Date().toISOString()
-      }
-    }];
-    
-    console.log('✅ Step 3: Returning minimal response:', response.length, 'blocks');
-    res.json(response);
-    
+    console.log('✅ Returning', blocks.length, 'loaded blocks with stats from database tables');
+    res.json(blocks);
   } catch (error) {
-    console.error('❌ Error in /blocks/loaded-stats:', error);
+    console.error('❌ Error fetching loaded blocks with stats:', error);
     console.error('❌ Error details:', error.message);
     console.error('❌ Error stack:', error.stack);
     res.status(500).json({ 
       error: 'Internal server error',
       details: error.message,
       endpoint: '/blocks/loaded-stats',
-      userId: req.user?.id,
-      step: 'unknown'
+      userId: req.user?.id
     });
   }
 });
