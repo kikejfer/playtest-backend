@@ -313,8 +313,11 @@ router.get('/loaded', authenticateToken, async (req, res) => {
 // Get loaded blocks with detailed stats (enhanced version for PJG)
 router.get('/loaded-stats', authenticateToken, async (req, res) => {
   try {
-    console.log('🔍 /blocks/loaded-stats endpoint called');
+    console.log('🔍 /blocks/loaded-stats endpoint called - SIMPLE VERSION');
     console.log('🔍 User ID:', req.user.id);
+    
+    // TEMPORARY: Just return the basic /loaded endpoint data with mock stats
+    console.log('🔍 Forwarding to /loaded endpoint with mock stats...');
     
     // Get user profile to see which blocks are loaded
     const userResult = await pool.query(
@@ -326,13 +329,13 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
     console.log('🔍 Loaded block IDs:', loadedBlockIds);
     
     if (loadedBlockIds.length === 0) {
+      console.log('✅ No loaded blocks, returning empty array');
       return res.json([]);
     }
     
-    // Get the basic blocks information first
+    // Use same logic as /loaded but add mock stats
     const placeholders = loadedBlockIds.map((_, index) => `$${index + 2}`).join(',');
-    
-    console.log('🔍 Loading basic block info for IDs:', loadedBlockIds);
+    console.log('🔍 Placeholders:', placeholders);
     
     const blocksResult = await pool.query(`
       SELECT b.id, b.name, b.description, b.observaciones, b.user_role_id, b.is_public, b.created_at, b.image_url,
@@ -349,70 +352,14 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
       ORDER BY b.created_at DESC
     `, [req.user.id, ...loadedBlockIds]);
 
-    console.log('🔍 Found loaded blocks:', blocksResult.rows.length);
-
-    // Get statistics for all blocks in separate queries
-    const topicStats = {};
-    const userStats = {};
-    const loadDates = {};
-
-    try {
-      // Get topic counts from topic_answers table
-      console.log('🔍 Querying topic_answers for topic counts...');
-      const topicResult = await pool.query(`
-        SELECT block_id, COUNT(*) as total_topics
-        FROM topic_answers 
-        WHERE block_id = ANY($1::int[])
-        GROUP BY block_id
-      `, [loadedBlockIds]);
-      
-      topicResult.rows.forEach(row => {
-        topicStats[row.block_id] = parseInt(row.total_topics);
-      });
-      console.log('✅ Topic stats:', topicStats);
-    } catch (error) {
-      console.warn('⚠️ Error getting topic stats (table may not exist):', error.message);
-    }
-
-    try {
-      // Get user counts from user_loaded_blocks table
-      console.log('🔍 Querying user_loaded_blocks for user counts...');
-      const userResult = await pool.query(`
-        SELECT block_id, COUNT(*) as total_users
-        FROM user_loaded_blocks 
-        WHERE block_id = ANY($1::int[])
-        GROUP BY block_id
-      `, [loadedBlockIds]);
-      
-      userResult.rows.forEach(row => {
-        userStats[row.block_id] = parseInt(row.total_users);
-      });
-      console.log('✅ User stats:', userStats);
-    } catch (error) {
-      console.warn('⚠️ Error getting user stats (table may not exist):', error.message);
-    }
-
-    try {
-      // Get load dates for current user from user_loaded_blocks table
-      console.log('🔍 Querying user_loaded_blocks for load dates...');
-      const dateResult = await pool.query(`
-        SELECT block_id, loaded_at
-        FROM user_loaded_blocks 
-        WHERE user_id = $1 AND block_id = ANY($2::int[])
-      `, [req.user.id, loadedBlockIds]);
-      
-      dateResult.rows.forEach(row => {
-        loadDates[row.block_id] = row.loaded_at;
-      });
-      console.log('✅ Load dates:', loadDates);
-    } catch (error) {
-      console.warn('⚠️ Error getting load dates (table may not exist):', error.message);
-    }
+    console.log('🔍 Found blocks from query:', blocksResult.rows.length);
 
     const blocks = [];
     
     for (const block of blocksResult.rows) {
-      // Get questions for this block with enhanced data
+      console.log(`🔍 Processing block ${block.id}: ${block.name}`);
+      
+      // Get questions for this block
       const questionsResult = await pool.query(`
         SELECT q.id, q.text_question, q.topic, q.block_id, q.difficulty, q.explanation,
                COALESCE(a.answer_a, '') as answer_a,
@@ -425,6 +372,8 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
         WHERE q.block_id = $1
         ORDER BY q.id
       `, [block.id]);
+
+      console.log(`🔍 Block ${block.id} has ${questionsResult.rows.length} questions`);
 
       const questions = questionsResult.rows.map(question => ({
         id: question.id,
@@ -441,6 +390,9 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
         correct_answer: question.correct_answer
       }));
 
+      // Count unique topics from questions
+      const uniqueTopics = [...new Set(questions.map(q => q.topic))];
+      
       blocks.push({
         id: block.id,
         name: block.name,
@@ -454,15 +406,15 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
         created_with_role: block.created_with_role,
         questions: questions,
         stats: {
-          totalQuestions: parseInt(block.question_count) || 0,
-          totalTopics: topicStats[block.id] || 0,
-          totalUsers: userStats[block.id] || 0,
-          loadedAt: loadDates[block.id] || null
+          totalQuestions: parseInt(block.question_count) || questions.length,
+          totalTopics: uniqueTopics.length, // Calculate from questions
+          totalUsers: 1, // Mock value for now
+          loadedAt: new Date().toISOString() // Mock current date
         }
       });
     }
     
-    console.log('🔍 Returning', blocks.length, 'loaded blocks with stats');
+    console.log('✅ Returning', blocks.length, 'loaded blocks with calculated stats');
     res.json(blocks);
   } catch (error) {
     console.error('❌ Error fetching loaded blocks with stats:', error);
@@ -471,7 +423,8 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
     res.status(500).json({ 
       error: 'Internal server error',
       details: error.message,
-      endpoint: '/blocks/loaded-stats'
+      endpoint: '/blocks/loaded-stats',
+      userId: req.user?.id
     });
   }
 });
