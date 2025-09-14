@@ -339,7 +339,7 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
         COALESCE(ba.total_questions, 0) as question_count,
         COALESCE(bt.total_topics, 0) as topic_count,
         COALESCE(bu.total_users, 0) as total_users,
-        up_load.created_at as loaded_at
+        up_load.updated_at as loaded_at
       FROM blocks b
       LEFT JOIN user_roles ur ON b.user_role_id = ur.id
       LEFT JOIN users u ON ur.user_id = u.id
@@ -348,7 +348,7 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
       LEFT JOIN (
         SELECT block_id, COUNT(DISTINCT topic) as total_topics
         FROM questions 
-        WHERE block_id IN (${placeholders})
+        WHERE block_id = ANY($${loadedBlockIds.length + 1}::int[])
         GROUP BY block_id
       ) bt ON b.id = bt.block_id
       LEFT JOIN (
@@ -362,7 +362,7 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
       LEFT JOIN user_profiles up_load ON up_load.user_id = $1
       WHERE b.id IN (${placeholders})
       ORDER BY b.created_at DESC
-    `, [req.user.id, ...loadedBlockIds]);
+    `, [req.user.id, loadedBlockIds, ...loadedBlockIds]);
 
     console.log('🔍 Found loaded blocks with stats:', blocksResult.rows.length);
 
