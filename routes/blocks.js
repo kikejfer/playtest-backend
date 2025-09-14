@@ -386,34 +386,57 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
         correct_answer: question.correct_answer
       }));
 
-      // Get statistics using proper database tables
+      // Get statistics using proper database tables - WITH ERROR HANDLING
+      let totalTopics = 0;
+      let totalUsers = 0;
+      let loadedAt = new Date().toISOString();
       
       // 1. Total topics from topic_answers table
       console.log(`🔍 Getting topic count from topic_answers for block ${block.id}`);
-      const topicCountResult = await pool.query(
-        'SELECT COUNT(*) as topic_count FROM topic_answers WHERE block_id = $1',
-        [block.id]
-      );
-      const totalTopics = parseInt(topicCountResult.rows[0]?.topic_count) || 0;
-      console.log(`🔍 Block ${block.id} has ${totalTopics} topics from topic_answers table`);
+      try {
+        const topicCountResult = await pool.query(
+          'SELECT COUNT(*) as topic_count FROM topic_answers WHERE block_id = $1',
+          [block.id]
+        );
+        totalTopics = parseInt(topicCountResult.rows[0]?.topic_count) || 0;
+        console.log(`✅ Block ${block.id} has ${totalTopics} topics from topic_answers table`);
+      } catch (topicError) {
+        console.error(`❌ Error querying topic_answers for block ${block.id}:`, topicError.message);
+        // Fallback: count unique topics from questions
+        const uniqueTopics = [...new Set(questions.map(q => q.topic).filter(Boolean))];
+        totalTopics = uniqueTopics.length;
+        console.log(`🔄 Fallback: Block ${block.id} has ${totalTopics} topics from questions`);
+      }
       
       // 2. Total users who have loaded this block from user_loaded_blocks table
       console.log(`🔍 Getting user count from user_loaded_blocks for block ${block.id}`);
-      const userCountResult = await pool.query(
-        'SELECT COUNT(*) as user_count FROM user_loaded_blocks WHERE block_id = $1',
-        [block.id]
-      );
-      const totalUsers = parseInt(userCountResult.rows[0]?.user_count) || 0;
-      console.log(`🔍 Block ${block.id} has been loaded by ${totalUsers} users`);
+      try {
+        const userCountResult = await pool.query(
+          'SELECT COUNT(*) as user_count FROM user_loaded_blocks WHERE block_id = $1',
+          [block.id]
+        );
+        totalUsers = parseInt(userCountResult.rows[0]?.user_count) || 0;
+        console.log(`✅ Block ${block.id} has been loaded by ${totalUsers} users`);
+      } catch (userError) {
+        console.error(`❌ Error querying user_loaded_blocks for block ${block.id}:`, userError.message);
+        totalUsers = 1; // Fallback value
+        console.log(`🔄 Fallback: Using totalUsers = 1 for block ${block.id}`);
+      }
       
       // 3. Load date for current user from user_loaded_blocks table
       console.log(`🔍 Getting load date from user_loaded_blocks for user ${req.user.id} and block ${block.id}`);
-      const loadDateResult = await pool.query(
-        'SELECT loaded_at FROM user_loaded_blocks WHERE user_id = $1 AND block_id = $2',
-        [req.user.id, block.id]
-      );
-      const loadedAt = loadDateResult.rows[0]?.loaded_at || new Date().toISOString();
-      console.log(`🔍 Block ${block.id} was loaded by user ${req.user.id} at:`, loadedAt);
+      try {
+        const loadDateResult = await pool.query(
+          'SELECT loaded_at FROM user_loaded_blocks WHERE user_id = $1 AND block_id = $2',
+          [req.user.id, block.id]
+        );
+        loadedAt = loadDateResult.rows[0]?.loaded_at || new Date().toISOString();
+        console.log(`✅ Block ${block.id} was loaded by user ${req.user.id} at:`, loadedAt);
+      } catch (dateError) {
+        console.error(`❌ Error querying user_loaded_blocks for user ${req.user.id} and block ${block.id}:`, dateError.message);
+        loadedAt = new Date().toISOString(); // Fallback to current date
+        console.log(`🔄 Fallback: Using current date for block ${block.id}`);
+      }
       
       blocks.push({
         id: block.id,
@@ -429,9 +452,9 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
         questions: questions,
         stats: {
           totalQuestions: parseInt(block.question_count) || questions.length,
-          totalTopics: totalTopics, // From topic_answers table
-          totalUsers: totalUsers,   // From user_loaded_blocks table
-          loadedAt: loadedAt       // From user_loaded_blocks table
+          totalTopics: totalTopics, // From topic_answers table (with fallback)
+          totalUsers: totalUsers,   // From user_loaded_blocks table (with fallback)
+          loadedAt: loadedAt       // From user_loaded_blocks table (with fallback)
         }
       });
     }
