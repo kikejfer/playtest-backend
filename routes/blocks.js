@@ -330,7 +330,10 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
     }
     
     // Get the actual blocks that are loaded with enhanced stats
-    const placeholders = loadedBlockIds.map((_, index) => `$${index + 2}`).join(',');
+    const placeholders = loadedBlockIds.map((_, index) => `$${index + 3}`).join(',');
+    
+    console.log('🔍 Debug params:', { userId: req.user.id, loadedBlockIds, placeholders });
+    
     const blocksResult = await pool.query(`
       SELECT b.id, b.name, b.description, b.observaciones, b.user_role_id, b.is_public, b.created_at, b.image_url,
         u.nickname as creator_nickname,
@@ -348,13 +351,13 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
       LEFT JOIN (
         SELECT block_id, COUNT(*) as total_topics
         FROM topic_answers 
-        WHERE block_id = ANY($${loadedBlockIds.length + 1}::int[])
+        WHERE block_id = ANY($2::int[])
         GROUP BY block_id
       ) bt ON b.id = bt.block_id
       LEFT JOIN (
         SELECT block_id, COUNT(*) as total_users
         FROM user_loaded_blocks 
-        WHERE block_id = ANY($${loadedBlockIds.length + 1}::int[])
+        WHERE block_id = ANY($2::int[])
         GROUP BY block_id
       ) bu ON b.id = bu.block_id
       LEFT JOIN user_loaded_blocks ulb ON ulb.user_id = $1 AND ulb.block_id = b.id
