@@ -485,23 +485,50 @@ router.put('/:id', authenticateToken, async (req, res) => {
 router.delete('/:id', authenticateToken, async (req, res) => {
   try {
     const gameId = req.params.id;
+    console.log(`🗑️ Delete game request - GameID: ${gameId}, UserID: ${req.user.id}`);
 
-    // Check if user created the game
-    const creatorCheck = await pool.query(
-      'SELECT created_by FROM games WHERE id = $1',
+    // Get game details including creator and participants
+    const gameCheck = await pool.query(
+      'SELECT created_by, player1_id, player2_id, mode FROM games WHERE id = $1',
       [gameId]
     );
 
-    if (creatorCheck.rows.length === 0) {
+    if (gameCheck.rows.length === 0) {
+      console.log(`❌ Game ${gameId} not found`);
       return res.status(404).json({ error: 'Game not found' });
     }
 
-    if (creatorCheck.rows[0].created_by !== req.user.id) {
+    const game = gameCheck.rows[0];
+    console.log(`🔍 Game details:`, {
+      gameId,
+      created_by: game.created_by,
+      player1_id: game.player1_id,
+      player2_id: game.player2_id,
+      mode: game.mode,
+      requesting_user: req.user.id
+    });
+
+    // Check if user is authorized (creator or participant)
+    const isCreator = game.created_by === req.user.id;
+    const isPlayer1 = game.player1_id === req.user.id;
+    const isPlayer2 = game.player2_id === req.user.id;
+    const isAuthorized = isCreator || isPlayer1 || isPlayer2;
+
+    console.log(`🔐 Authorization check:`, {
+      isCreator,
+      isPlayer1, 
+      isPlayer2,
+      isAuthorized
+    });
+
+    if (!isAuthorized) {
+      console.log(`❌ User ${req.user.id} not authorized to delete game ${gameId}`);
       return res.status(403).json({ error: 'Not authorized to delete this game' });
     }
 
     await pool.query('DELETE FROM games WHERE id = $1', [gameId]);
 
+    console.log(`✅ Game ${gameId} deleted successfully by user ${req.user.id}`);
     res.json({ message: 'Game deleted successfully' });
 
   } catch (error) {
