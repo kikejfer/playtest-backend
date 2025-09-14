@@ -313,11 +313,8 @@ router.get('/loaded', authenticateToken, async (req, res) => {
 // Get loaded blocks with detailed stats (enhanced version for PJG)
 router.get('/loaded-stats', authenticateToken, async (req, res) => {
   try {
-    console.log('🔍 /blocks/loaded-stats endpoint called - SIMPLE VERSION');
+    console.log('🔍 /blocks/loaded-stats endpoint called - PROPER IMPLEMENTATION');
     console.log('🔍 User ID:', req.user.id);
-    
-    // TEMPORARY: Just return the basic /loaded endpoint data with mock stats
-    console.log('🔍 Forwarding to /loaded endpoint with mock stats...');
     
     // Get user profile to see which blocks are loaded
     const userResult = await pool.query(
@@ -333,7 +330,6 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
       return res.json([]);
     }
     
-    // Use same logic as /loaded but add mock stats
     const placeholders = loadedBlockIds.map((_, index) => `$${index + 2}`).join(',');
     console.log('🔍 Placeholders:', placeholders);
     
@@ -390,8 +386,34 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
         correct_answer: question.correct_answer
       }));
 
-      // Count unique topics from questions
-      const uniqueTopics = [...new Set(questions.map(q => q.topic))];
+      // Get statistics using proper database tables
+      
+      // 1. Total topics from topic_answers table
+      console.log(`🔍 Getting topic count from topic_answers for block ${block.id}`);
+      const topicCountResult = await pool.query(
+        'SELECT COUNT(*) as topic_count FROM topic_answers WHERE block_id = $1',
+        [block.id]
+      );
+      const totalTopics = parseInt(topicCountResult.rows[0]?.topic_count) || 0;
+      console.log(`🔍 Block ${block.id} has ${totalTopics} topics from topic_answers table`);
+      
+      // 2. Total users who have loaded this block from user_loaded_blocks table
+      console.log(`🔍 Getting user count from user_loaded_blocks for block ${block.id}`);
+      const userCountResult = await pool.query(
+        'SELECT COUNT(*) as user_count FROM user_loaded_blocks WHERE block_id = $1',
+        [block.id]
+      );
+      const totalUsers = parseInt(userCountResult.rows[0]?.user_count) || 0;
+      console.log(`🔍 Block ${block.id} has been loaded by ${totalUsers} users`);
+      
+      // 3. Load date for current user from user_loaded_blocks table
+      console.log(`🔍 Getting load date from user_loaded_blocks for user ${req.user.id} and block ${block.id}`);
+      const loadDateResult = await pool.query(
+        'SELECT loaded_at FROM user_loaded_blocks WHERE user_id = $1 AND block_id = $2',
+        [req.user.id, block.id]
+      );
+      const loadedAt = loadDateResult.rows[0]?.loaded_at || new Date().toISOString();
+      console.log(`🔍 Block ${block.id} was loaded by user ${req.user.id} at:`, loadedAt);
       
       blocks.push({
         id: block.id,
@@ -407,14 +429,14 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
         questions: questions,
         stats: {
           totalQuestions: parseInt(block.question_count) || questions.length,
-          totalTopics: uniqueTopics.length, // Calculate from questions
-          totalUsers: 1, // Mock value for now
-          loadedAt: new Date().toISOString() // Mock current date
+          totalTopics: totalTopics, // From topic_answers table
+          totalUsers: totalUsers,   // From user_loaded_blocks table
+          loadedAt: loadedAt       // From user_loaded_blocks table
         }
       });
     }
     
-    console.log('✅ Returning', blocks.length, 'loaded blocks with calculated stats');
+    console.log('✅ Returning', blocks.length, 'loaded blocks with proper database stats');
     res.json(blocks);
   } catch (error) {
     console.error('❌ Error fetching loaded blocks with stats:', error);
