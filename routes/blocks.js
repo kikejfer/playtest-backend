@@ -339,27 +339,25 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
         COALESCE(ba.total_questions, 0) as question_count,
         COALESCE(bt.total_topics, 0) as topic_count,
         COALESCE(bu.total_users, 0) as total_users,
-        up_load.updated_at as loaded_at
+        ulb.loaded_at as loaded_at
       FROM blocks b
       LEFT JOIN user_roles ur ON b.user_role_id = ur.id
       LEFT JOIN users u ON ur.user_id = u.id
       LEFT JOIN roles r ON ur.role_id = r.id
       LEFT JOIN block_answers ba ON b.id = ba.block_id
       LEFT JOIN (
-        SELECT block_id, COUNT(DISTINCT topic) as total_topics
-        FROM questions 
+        SELECT block_id, COUNT(*) as total_topics
+        FROM topic_answers 
         WHERE block_id = ANY($${loadedBlockIds.length + 1}::int[])
         GROUP BY block_id
       ) bt ON b.id = bt.block_id
       LEFT JOIN (
-        SELECT 
-          jsonb_array_elements_text(loaded_blocks)::integer as block_id,
-          COUNT(*) as total_users
-        FROM user_profiles 
-        WHERE loaded_blocks IS NOT NULL AND loaded_blocks != '[]'::jsonb
-        GROUP BY jsonb_array_elements_text(loaded_blocks)::integer
+        SELECT block_id, COUNT(*) as total_users
+        FROM user_loaded_blocks 
+        WHERE block_id = ANY($${loadedBlockIds.length + 1}::int[])
+        GROUP BY block_id
       ) bu ON b.id = bu.block_id
-      LEFT JOIN user_profiles up_load ON up_load.user_id = $1
+      LEFT JOIN user_loaded_blocks ulb ON ulb.user_id = $1 AND ulb.block_id = b.id
       WHERE b.id IN (${placeholders})
       ORDER BY b.created_at DESC
     `, [req.user.id, loadedBlockIds, ...loadedBlockIds]);
