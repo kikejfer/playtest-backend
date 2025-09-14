@@ -338,6 +338,7 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
         r.name as created_with_role,
         COALESCE(ba.total_questions, 0) as question_count,
         COALESCE(bt.total_topics, 0) as topic_count,
+        COALESCE(bu.total_users, 0) as total_users,
         up_load.created_at as loaded_at
       FROM blocks b
       LEFT JOIN user_roles ur ON b.user_role_id = ur.id
@@ -350,6 +351,14 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
         WHERE block_id IN (${placeholders})
         GROUP BY block_id
       ) bt ON b.id = bt.block_id
+      LEFT JOIN (
+        SELECT 
+          jsonb_array_elements_text(loaded_blocks)::integer as block_id,
+          COUNT(*) as total_users
+        FROM user_profiles 
+        WHERE loaded_blocks IS NOT NULL AND loaded_blocks != '[]'::jsonb
+        GROUP BY jsonb_array_elements_text(loaded_blocks)::integer
+      ) bu ON b.id = bu.block_id
       LEFT JOIN user_profiles up_load ON up_load.user_id = $1
       WHERE b.id IN (${placeholders})
       ORDER BY b.created_at DESC
@@ -404,6 +413,7 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
         stats: {
           totalQuestions: parseInt(block.question_count) || 0,
           totalTopics: parseInt(block.topic_count) || 0,
+          totalUsers: parseInt(block.total_users) || 0,
           loadedAt: block.loaded_at
         }
       });
