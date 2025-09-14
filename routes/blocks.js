@@ -329,43 +329,85 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
       return res.json([]);
     }
     
-    // Get the actual blocks that are loaded with enhanced stats
-    const placeholders = loadedBlockIds.map((_, index) => `$${index + 3}`).join(',');
+    // Get the basic blocks information first
+    const placeholders = loadedBlockIds.map((_, index) => `$${index + 2}`).join(',');
     
-    console.log('🔍 Debug params:', { userId: req.user.id, loadedBlockIds, placeholders });
+    console.log('🔍 Loading basic block info for IDs:', loadedBlockIds);
     
     const blocksResult = await pool.query(`
       SELECT b.id, b.name, b.description, b.observaciones, b.user_role_id, b.is_public, b.created_at, b.image_url,
         u.nickname as creator_nickname,
         u.id as creator_id,
         r.name as created_with_role,
-        COALESCE(ba.total_questions, 0) as question_count,
-        COALESCE(bt.total_topics, 0) as topic_count,
-        COALESCE(bu.total_users, 0) as total_users,
-        ulb.loaded_at as loaded_at
+        COALESCE(ba.total_questions, 0) as question_count
       FROM blocks b
       LEFT JOIN user_roles ur ON b.user_role_id = ur.id
       LEFT JOIN users u ON ur.user_id = u.id
       LEFT JOIN roles r ON ur.role_id = r.id
       LEFT JOIN block_answers ba ON b.id = ba.block_id
-      LEFT JOIN (
-        SELECT block_id, COUNT(*) as total_topics
-        FROM topic_answers 
-        WHERE block_id = ANY($2::int[])
-        GROUP BY block_id
-      ) bt ON b.id = bt.block_id
-      LEFT JOIN (
-        SELECT block_id, COUNT(*) as total_users
-        FROM user_loaded_blocks 
-        WHERE block_id = ANY($2::int[])
-        GROUP BY block_id
-      ) bu ON b.id = bu.block_id
-      LEFT JOIN user_loaded_blocks ulb ON ulb.user_id = $1 AND ulb.block_id = b.id
       WHERE b.id IN (${placeholders})
       ORDER BY b.created_at DESC
-    `, [req.user.id, loadedBlockIds, ...loadedBlockIds]);
+    `, [req.user.id, ...loadedBlockIds]);
 
-    console.log('🔍 Found loaded blocks with stats:', blocksResult.rows.length);
+    console.log('🔍 Found loaded blocks:', blocksResult.rows.length);
+
+    // Get statistics for all blocks in separate queries
+    const topicStats = {};
+    const userStats = {};
+    const loadDates = {};
+
+    try {
+      // Get topic counts from topic_answers table
+      console.log('🔍 Querying topic_answers for topic counts...');
+      const topicResult = await pool.query(`
+        SELECT block_id, COUNT(*) as total_topics
+        FROM topic_answers 
+        WHERE block_id = ANY($1::int[])
+        GROUP BY block_id
+      `, [loadedBlockIds]);
+      
+      topicResult.rows.forEach(row => {
+        topicStats[row.block_id] = parseInt(row.total_topics);
+      });
+      console.log('✅ Topic stats:', topicStats);
+    } catch (error) {
+      console.warn('⚠️ Error getting topic stats (table may not exist):', error.message);
+    }
+
+    try {
+      // Get user counts from user_loaded_blocks table
+      console.log('🔍 Querying user_loaded_blocks for user counts...');
+      const userResult = await pool.query(`
+        SELECT block_id, COUNT(*) as total_users
+        FROM user_loaded_blocks 
+        WHERE block_id = ANY($1::int[])
+        GROUP BY block_id
+      `, [loadedBlockIds]);
+      
+      userResult.rows.forEach(row => {
+        userStats[row.block_id] = parseInt(row.total_users);
+      });
+      console.log('✅ User stats:', userStats);
+    } catch (error) {
+      console.warn('⚠️ Error getting user stats (table may not exist):', error.message);
+    }
+
+    try {
+      // Get load dates for current user from user_loaded_blocks table
+      console.log('🔍 Querying user_loaded_blocks for load dates...');
+      const dateResult = await pool.query(`
+        SELECT block_id, loaded_at
+        FROM user_loaded_blocks 
+        WHERE user_id = $1 AND block_id = ANY($2::int[])
+      `, [req.user.id, loadedBlockIds]);
+      
+      dateResult.rows.forEach(row => {
+        loadDates[row.block_id] = row.loaded_at;
+      });
+      console.log('✅ Load dates:', loadDates);
+    } catch (error) {
+      console.warn('⚠️ Error getting load dates (table may not exist):', error.message);
+    }
 
     const blocks = [];
     
@@ -413,9 +455,9 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
         questions: questions,
         stats: {
           totalQuestions: parseInt(block.question_count) || 0,
-          totalTopics: parseInt(block.topic_count) || 0,
-          totalUsers: parseInt(block.total_users) || 0,
-          loadedAt: block.loaded_at
+          totalTopics: topicStats[block.id] || 0,
+          totalUsers: userStats[block.id] || 0,
+          loadedAt: loadDates[block.id] || null
         }
       });
     }
