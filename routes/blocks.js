@@ -785,10 +785,10 @@ router.post('/', authenticateToken, async (req, res) => {
     const nivelId = req.body.nivel_id || req.body.nivelId || null;  
     const estadoId = req.body.estado_id || req.body.estadoId || null;
 
-    // Create the block with image, observations, user_id, user_role_id and metadata
+    // Create the block with image, observations, user_role_id and metadata
     const result = await pool.query(
-      'INSERT INTO blocks (name, description, observaciones, user_id, user_role_id, is_public, image_url, tipo_id, nivel_id, estado_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
-      [name, description, observaciones, req.user.id, userRoleRecordId, isPublic, imageUrl, tipoId, nivelId, estadoId]
+      'INSERT INTO blocks (name, description, observaciones, user_role_id, is_public, image_url, tipo_id, nivel_id, estado_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *',
+      [name, description, observaciones, userRoleRecordId, isPublic, imageUrl, tipoId, nivelId, estadoId]
     );
 
     const newBlock = result.rows[0];
