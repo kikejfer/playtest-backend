@@ -34,10 +34,12 @@ router.post('/', authenticateToken, async (req, res) => {
     }
 
     // Check if user owns the block
-    const blockCheck = await client.query(
-      'SELECT user_id FROM blocks WHERE id = $1',
-      [blockId]
-    );
+    const blockCheck = await client.query(`
+      SELECT b.id, ur.user_id 
+      FROM blocks b
+      LEFT JOIN user_roles ur ON b.user_role_id = ur.id
+      WHERE b.id = $1
+    `, [blockId]);
 
     if (blockCheck.rows.length === 0) {
       return res.status(404).json({ error: 'Block not found' });
@@ -208,10 +210,12 @@ router.post('/bulk', authenticateToken, async (req, res) => {
     }
 
     // Check if user owns the block
-    const blockCheck = await client.query(
-      'SELECT user_id FROM blocks WHERE id = $1',
-      [blockId]
-    );
+    const blockCheck = await client.query(`
+      SELECT b.id, ur.user_id 
+      FROM blocks b
+      LEFT JOIN user_roles ur ON b.user_role_id = ur.id
+      WHERE b.id = $1
+    `, [blockId]);
 
     if (blockCheck.rows.length === 0) {
       return res.status(404).json({ error: 'Block not found' });
