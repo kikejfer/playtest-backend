@@ -155,8 +155,8 @@ app.use('*', (req, res) => {
 const EscalationScheduler = require('./setup-cron');
 const escalationScheduler = new EscalationScheduler();
 
-// Initialize support automation system
-const supportAutomation = require('./support-automation');
+// Initialize support automation system (DISABLED - causing SQL errors)
+// const supportAutomation = require('./support-automation');
 
 // Auto-setup system
 const autoSetup = require('./auto-setup');
@@ -174,7 +174,7 @@ const compatibilityLayer = new RoutesCompatibilityLayer();
 
 // Make schedulers globally accessible for API routes
 global.escalationScheduler = escalationScheduler;
-global.supportAutomation = supportAutomation;
+// global.supportAutomation = supportAutomation;
 global.realTimeEvents = realTimeEvents;
 global.compatibilityLayer = compatibilityLayer;
 
@@ -225,12 +225,12 @@ server.listen(PORT, async () => {
   // Start escalation scheduler
   escalationScheduler.start();
   
-  // Start support automation system
-  supportAutomation.start().then(() => {
-    console.log('🤖 Sistema de automatización de soporte iniciado');
-  }).catch(err => {
-    console.error('❌ Error iniciando sistema de automatización:', err);
-  });
+  // Start support automation system (DISABLED - causing SQL errors)
+  // supportAutomation.start().then(() => {
+  //   console.log('🤖 Sistema de automatización de soporte iniciado');
+  // }).catch(err => {
+  //   console.error('❌ Error iniciando sistema de automatización:', err);
+  // });
 });
 
 console.log('Deploy timestamp:', new Date().toISOString());
