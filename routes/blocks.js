@@ -737,17 +737,10 @@ router.post('/', authenticateToken, async (req, res) => {
         return res.status(400).json({ error: 'Current role header is required' });
       }
 
-      // Map panel codes to role names
-      const roleMapping = {
-        'PAP': 'administrador_principal',
-        'PAS': 'administrador_secundario', 
-        'PPF': 'profesor',
-        'PCC': 'creador',
-        'PJG': 'jugador'
-      };
-      
-      const actualRoleName = roleMapping[currentRole] || currentRole;
-      console.log('🎭 Role mapping:', currentRole, '→', actualRoleName);
+      // currentRole should be a database role name (creador, jugador, etc.)
+      // No mapping needed - frontend should send actual role names
+      const actualRoleName = currentRole;
+      console.log('🎭 Using role directly from header:', actualRoleName);
 
       const userRoleResult = await pool.query(`
         SELECT ur.id, r.name as role_name
@@ -1447,17 +1440,10 @@ router.get('/created-stats', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Current role header is required' });
     }
 
-    // Map panel codes to role names
-    const roleMapping = {
-      'PAP': 'administrador_principal',
-      'PAS': 'administrador_secundario', 
-      'PPF': 'profesor',
-      'PCC': 'creador',
-      'PJG': 'jugador'
-    };
-    
-    const actualRoleName = roleMapping[currentRole] || currentRole;
-    console.log('🎭 Role mapping:', currentRole, '→', actualRoleName);
+    // currentRole should be a database role name (creador, jugador, etc.)
+    // No mapping needed - frontend should send actual role names
+    const actualRoleName = currentRole;
+    console.log('🎭 Using role directly from header:', actualRoleName);
 
     // Get user's specific user_role record for the current active role
     const userRoleResult = await pool.query(`
