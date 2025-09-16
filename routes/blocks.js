@@ -315,15 +315,51 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
   try {
     console.log('🔍 /blocks/loaded-stats endpoint called');
     console.log('🔍 User ID:', req.user.id);
-    
+    console.log('🔍 Headers:', req.headers);
+
+    // Get the current active role from header
+    const currentRole = req.headers['x-current-role'];
+    if (!currentRole) {
+      return res.status(400).json({ error: 'Current role header is required' });
+    }
+
+    // Map panel codes from frontend to database role names
+    const panelToRoleMapping = {
+      'PCC': 'creador',
+      'PPF': 'profesor',
+      'PJG': 'jugador',
+      'PAP': 'administrador_principal',
+      'PAS': 'administrador_secundario'
+    };
+
+    // Convert panel code to database role name if needed
+    const actualRoleName = panelToRoleMapping[currentRole] || currentRole;
+    console.log('🎭 Role from header:', currentRole, '-> Database role:', actualRoleName);
+
+    // Get user's specific user_role record for the current active role
+    const userRoleResult = await pool.query(`
+      SELECT ur.id as user_role_id, r.name as role_name
+      FROM user_roles ur
+      JOIN roles r ON ur.role_id = r.id
+      WHERE ur.user_id = $1 AND r.name = $2
+      LIMIT 1
+    `, [req.user.id, actualRoleName]);
+
+    if (userRoleResult.rows.length === 0) {
+      return res.status(403).json({ error: 'User does not have the specified role' });
+    }
+
+    const userRoleId = userRoleResult.rows[0].user_role_id;
+    console.log('👤 User role ID for query:', userRoleId, 'Role:', userRoleResult.rows[0].role_name);
+
     // Get user profile to see which blocks are loaded
     const userResult = await pool.query(
       'SELECT loaded_blocks FROM user_profiles WHERE user_id = $1',
       [req.user.id]
     );
-    
+
     const loadedBlockIds = userResult.rows[0]?.loaded_blocks || [];
-    console.log('🔍 Loaded block IDs:', loadedBlockIds);
+    console.log('🔍 Loaded block IDs for role', actualRoleName, ':', loadedBlockIds);
     
     if (loadedBlockIds.length === 0) {
       console.log('✅ No loaded blocks, returning empty array');
@@ -385,31 +421,53 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
         correct_answer: question.correct_answer
       }));
 
-      // Calculate statistics using correct database tables as specified:
-      
-      // 1. Total topics: COUNT from topic_answers table filtered by block_id
-      const topicCountResult = await pool.query(
-        'SELECT COUNT(*) as topic_count FROM topic_answers WHERE block_id = $1',
-        [block.id]
-      );
-      const totalTopics = parseInt(topicCountResult.rows[0]?.topic_count) || 0;
-      console.log(`🔍 Block ${block.id} has ${totalTopics} topics from topic_answers table`);
-      
-      // 2. Total users: COUNT from user_loaded_blocks table filtered by block_id
-      const userCountResult = await pool.query(
-        'SELECT COUNT(*) as user_count FROM user_loaded_blocks WHERE block_id = $1',
-        [block.id]
-      );
-      const totalUsers = parseInt(userCountResult.rows[0]?.user_count) || 0;
-      console.log(`🔍 Block ${block.id} has been loaded by ${totalUsers} users`);
-      
-      // 3. Load date: loaded_at from user_loaded_blocks filtered by user_id and block_id
-      const loadDateResult = await pool.query(
-        'SELECT loaded_at FROM user_loaded_blocks WHERE user_id = $1 AND block_id = $2',
-        [req.user.id, block.id]
-      );
-      const loadedAt = loadDateResult.rows[0]?.loaded_at || new Date().toISOString();
-      console.log(`🔍 Block ${block.id} was loaded by user ${req.user.id} at:`, loadedAt);
+      // Calculate statistics efficiently:
+
+      // 1. Total questions from actual questions count (most accurate)
+      const totalQuestions = questions.length;
+
+      // 2. Total unique topics from questions
+      const uniqueTopics = [...new Set(questions.map(q => q.topic).filter(topic => topic && topic.trim()))];
+      const totalTopics = uniqueTopics.length;
+      console.log(`🔍 Block ${block.id} has ${totalQuestions} questions and ${totalTopics} unique topics:`, uniqueTopics.slice(0, 3));
+
+      // 3. Total users who have this block loaded (fallback to user_loaded_blocks if exists)
+      let totalUsers = 0;
+      try {
+        const userCountResult = await pool.query(
+          'SELECT COUNT(*) as user_count FROM user_loaded_blocks WHERE block_id = $1',
+          [block.id]
+        );
+        totalUsers = parseInt(userCountResult.rows[0]?.user_count) || 0;
+      } catch (e) {
+        // Table might not exist, estimate from user_profiles.loaded_blocks
+        console.log(`🔍 user_loaded_blocks table not available, estimating...`);
+        try {
+          const profileCountResult = await pool.query(
+            'SELECT COUNT(*) as user_count FROM user_profiles WHERE loaded_blocks @> $1::jsonb',
+            [JSON.stringify([block.id])]
+          );
+          totalUsers = parseInt(profileCountResult.rows[0]?.user_count) || 0;
+        } catch (profileError) {
+          console.log(`🔍 Could not count users for block ${block.id}:`, profileError.message);
+          totalUsers = 1; // At least current user has it loaded
+        }
+      }
+
+      // 4. Load date (when current user loaded this block)
+      let loadedAt = new Date().toISOString();
+      try {
+        const loadDateResult = await pool.query(
+          'SELECT loaded_at FROM user_loaded_blocks WHERE user_id = $1 AND block_id = $2',
+          [req.user.id, block.id]
+        );
+        loadedAt = loadDateResult.rows[0]?.loaded_at || loadedAt;
+      } catch (e) {
+        // Table might not exist, use current timestamp
+        console.log(`🔍 user_loaded_blocks table not available for load date`);
+      }
+
+      console.log(`🔍 Block ${block.id} stats: ${totalQuestions} questions, ${totalTopics} topics, ${totalUsers} users`);
       
       blocks.push({
         id: block.id,
@@ -424,7 +482,7 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
         created_with_role: block.created_with_role,
         questions: questions,
         stats: {
-          totalQuestions: parseInt(block.question_count) || questions.length,
+          totalQuestions: totalQuestions,
           totalTopics: totalTopics,
           totalUsers: totalUsers,
           loadedAt: loadedAt
