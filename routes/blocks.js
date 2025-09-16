@@ -743,7 +743,7 @@ router.post('/', authenticateToken, async (req, res) => {
         'PAS': 'administrador_secundario', 
         'PPF': 'profesor',
         'PCC': 'creador',
-        'PJU': 'jugador'
+        'PJG': 'jugador'
       };
       
       const actualRoleName = roleMapping[currentRole] || currentRole;
@@ -1453,7 +1453,7 @@ router.get('/created-stats', authenticateToken, async (req, res) => {
       'PAS': 'administrador_secundario', 
       'PPF': 'profesor',
       'PCC': 'creador',
-      'PJU': 'jugador'
+      'PJG': 'jugador'
     };
     
     const actualRoleName = roleMapping[currentRole] || currentRole;
