@@ -36,7 +36,8 @@ const authenticateToken = async (req, res, next) => {
 
     req.user = {
       id: decoded.userId,
-      nickname: result.rows[0].nickname
+      nickname: result.rows[0].nickname,
+      roles: decoded.roles || []
     };
     
     console.log('✅ Authentication successful for user:', req.user.nickname);
