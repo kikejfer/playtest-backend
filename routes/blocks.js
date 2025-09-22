@@ -141,6 +141,34 @@ router.get('/available', authenticateToken, async (req, res) => {
 
       console.log(`🔍 Block ${block.id} has ${questionsResult.rows.length} questions`);
 
+      // Get unique topics count from topic_questions table
+      let topicCount = 0;
+      try {
+        const topicsResult = await pool.query(`
+          SELECT COUNT(*) as topic_count
+          FROM topic_questions
+          WHERE block_id = $1
+        `, [block.id]);
+        topicCount = parseInt(topicsResult.rows[0]?.topic_count) || 0;
+        console.log(`🔍 Block ${block.id} has ${topicCount} unique topics`);
+      } catch (error) {
+        console.log(`⚠️ Error getting topics for block ${block.id}:`, error.message);
+      }
+
+      // Get users count who have loaded this block from user_loaded_blocks table
+      let userCount = 0;
+      try {
+        const usersResult = await pool.query(`
+          SELECT COUNT(*) as user_count
+          FROM user_loaded_blocks
+          WHERE block_id = $1
+        `, [block.id]);
+        userCount = parseInt(usersResult.rows[0]?.user_count) || 0;
+        console.log(`🔍 Block ${block.id} has been loaded by ${userCount} users`);
+      } catch (error) {
+        console.log(`⚠️ Error getting users for block ${block.id}:`, error.message);
+      }
+
       // Get answers for questions (simplified)
       const questions = [];
       for (const q of questionsResult.rows) {
@@ -174,8 +202,10 @@ router.get('/available', authenticateToken, async (req, res) => {
         creatorNickname: block.creator_nickname || 'Unknown',
         isPublic: block.is_public,
         questionCount: parseInt(block.question_count) || 0,
+        topicCount: topicCount,
+        userCount: userCount,
         imageUrl: block.image_url,
-        
+
         // Metadata IDs for filtering
         tipo_id: block.tipo_id,
         nivel_id: block.nivel_id,
@@ -258,6 +288,48 @@ router.get('/loaded', authenticateToken, async (req, res) => {
 
       console.log(`🔍 Loaded block ${block.id} has ${questionsResult.rows.length} questions`);
 
+      // Get unique topics count from topic_questions table
+      let topicCount = 0;
+      try {
+        const topicsResult = await pool.query(`
+          SELECT COUNT(*) as topic_count
+          FROM topic_questions
+          WHERE block_id = $1
+        `, [block.id]);
+        topicCount = parseInt(topicsResult.rows[0]?.topic_count) || 0;
+        console.log(`🔍 Loaded block ${block.id} has ${topicCount} unique topics`);
+      } catch (error) {
+        console.log(`⚠️ Error getting topics for loaded block ${block.id}:`, error.message);
+      }
+
+      // Get students/users count who have loaded this block from user_loaded_blocks table
+      let studentCount = 0;
+      try {
+        const studentsResult = await pool.query(`
+          SELECT COUNT(*) as student_count
+          FROM user_loaded_blocks
+          WHERE block_id = $1
+        `, [block.id]);
+        studentCount = parseInt(studentsResult.rows[0]?.student_count) || 0;
+        console.log(`🔍 Loaded block ${block.id} has ${studentCount} students who have loaded it`);
+      } catch (error) {
+        console.log(`⚠️ Error getting students for loaded block ${block.id}:`, error.message);
+      }
+
+      // Get loaded date for this user and block
+      let loadedAt = null;
+      try {
+        const loadedDateResult = await pool.query(`
+          SELECT loaded_at
+          FROM user_loaded_blocks
+          WHERE user_id = $1 AND block_id = $2
+        `, [req.user.id, block.id]);
+        loadedAt = loadedDateResult.rows[0]?.loaded_at || null;
+        console.log(`🔍 Block ${block.id} was loaded by user ${req.user.id} at:`, loadedAt);
+      } catch (error) {
+        console.log(`⚠️ Error getting load date for block ${block.id}:`, error.message);
+      }
+
       // Get answers for questions (simplified)
       const questions = [];
       for (const q of questionsResult.rows) {
@@ -291,6 +363,9 @@ router.get('/loaded', authenticateToken, async (req, res) => {
         creatorNickname: block.creator_nickname || 'Unknown',
         isPublic: block.is_public,
         questionCount: parseInt(block.question_count) || 0,
+        topicCount: topicCount,
+        studentCount: studentCount,
+        loadedAt: loadedAt,
         imageUrl: block.image_url,
         questions: questions
       });
