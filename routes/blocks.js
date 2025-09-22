@@ -144,11 +144,13 @@ router.get('/available', authenticateToken, async (req, res) => {
       // Get unique topics count from topic_questions table
       let topicCount = 0;
       try {
+        console.log(`🔍 DEBUG: Querying topic_questions for block_id ${block.id}`);
         const topicsResult = await pool.query(`
           SELECT COUNT(*) as topic_count
           FROM topic_questions
           WHERE block_id = $1
         `, [block.id]);
+        console.log(`🔍 DEBUG: topic_questions query result:`, topicsResult.rows);
         topicCount = parseInt(topicsResult.rows[0]?.topic_count) || 0;
         console.log(`🔍 Block ${block.id} has ${topicCount} unique topics`);
       } catch (error) {
@@ -158,11 +160,13 @@ router.get('/available', authenticateToken, async (req, res) => {
       // Get users count who have loaded this block from user_loaded_blocks table
       let userCount = 0;
       try {
+        console.log(`🔍 DEBUG: Querying user_loaded_blocks for block_id ${block.id}`);
         const usersResult = await pool.query(`
           SELECT COUNT(*) as user_count
           FROM user_loaded_blocks
           WHERE block_id = $1
         `, [block.id]);
+        console.log(`🔍 DEBUG: user_loaded_blocks query result:`, usersResult.rows);
         userCount = parseInt(usersResult.rows[0]?.user_count) || 0;
         console.log(`🔍 Block ${block.id} has been loaded by ${userCount} users`);
       } catch (error) {
