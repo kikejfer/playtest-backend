@@ -141,16 +141,16 @@ router.get('/available', authenticateToken, async (req, res) => {
 
       console.log(`🔍 Block ${block.id} has ${questionsResult.rows.length} questions`);
 
-      // Get unique topics count from topic_questions table
+      // Get unique topics count from topic_answers table
       let topicCount = 0;
       try {
-        console.log(`🔍 DEBUG: Querying topic_questions for block_id ${block.id}`);
+        console.log(`🔍 DEBUG: Querying topic_answers for block_id ${block.id}`);
         const topicsResult = await pool.query(`
           SELECT COUNT(*) as topic_count
-          FROM topic_questions
+          FROM topic_answers
           WHERE block_id = $1
         `, [block.id]);
-        console.log(`🔍 DEBUG: topic_questions query result:`, topicsResult.rows);
+        console.log(`🔍 DEBUG: topic_answers query result:`, topicsResult.rows);
         topicCount = parseInt(topicsResult.rows[0]?.topic_count) || 0;
         console.log(`🔍 Block ${block.id} has ${topicCount} unique topics`);
       } catch (error) {
@@ -292,12 +292,12 @@ router.get('/loaded', authenticateToken, async (req, res) => {
 
       console.log(`🔍 Loaded block ${block.id} has ${questionsResult.rows.length} questions`);
 
-      // Get unique topics count from topic_questions table
+      // Get unique topics count from topic_answers table
       let topicCount = 0;
       try {
         const topicsResult = await pool.query(`
           SELECT COUNT(*) as topic_count
-          FROM topic_questions
+          FROM topic_answers
           WHERE block_id = $1
         `, [block.id]);
         topicCount = parseInt(topicsResult.rows[0]?.topic_count) || 0;
