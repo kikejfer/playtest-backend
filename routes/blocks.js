@@ -537,20 +537,20 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
       blocks.push({
         id: block.id,
         name: block.name,
+        nombreCorto: block.name,
+        nombreLargo: block.description || block.name,
         description: block.description,
-        observaciones: block.observaciones,
-        is_public: block.is_public,
-        created_at: block.created_at,
-        image_url: block.image_url,
-        creator_nickname: block.creator_nickname,
-        creator_id: block.creator_id,
-        created_with_role: block.created_with_role,
+        creatorId: block.creator_id,
+        creatorNickname: block.creator_nickname || 'Unknown',
+        isPublic: block.is_public,
+        questionCount: parseInt(block.question_count) || 0,
         stats: {
           totalQuestions: totalQuestions,
           totalTopics: totalTopics,
           totalUsers: totalUsers,
           loadedAt: loadedAt
-        }
+        },
+        imageUrl: block.image_url
       });
     }
     
