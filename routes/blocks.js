@@ -479,13 +479,22 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
 
       // Calculate statistics efficiently:
 
-      // 1. Total questions from actual questions count (most accurate)
-      const totalQuestions = questions.length;
+      // 1. Total questions from block_answers table
+      const totalQuestions = parseInt(block.question_count) || 0;
 
-      // 2. Total unique topics from questions
-      const uniqueTopics = [...new Set(questions.map(q => q.topic).filter(topic => topic && topic.trim()))];
-      const totalTopics = uniqueTopics.length;
-      console.log(`🔍 Block ${block.id} has ${totalQuestions} questions and ${totalTopics} unique topics:`, uniqueTopics.slice(0, 3));
+      // 2. Total unique topics using topic_answers query
+      let totalTopics = 0;
+      try {
+        console.log(`🔍 DEBUG: Querying topic_answers for block_id ${block.id}`);
+        const topicsResult = await pool.query(`
+          SELECT COUNT(*) as topic_count FROM topic_answers WHERE block_id = $1
+        `, [block.id]);
+        console.log(`🔍 DEBUG: topic_answers query result:`, topicsResult.rows);
+        totalTopics = parseInt(topicsResult.rows[0]?.topic_count) || 0;
+        console.log(`🔍 Loaded block ${block.id} has ${totalTopics} unique topics`);
+      } catch (error) {
+        console.log(`❌ Error calculating topics for loaded block ${block.id}:`, error.message);
+      }
 
       // 3. Total users who have this block loaded (fallback to user_loaded_blocks if exists)
       let totalUsers = 0;
