@@ -208,7 +208,8 @@ router.get('/available', authenticateToken, async (req, res) => {
         questionCount: parseInt(block.question_count) || 0,
         stats: {
           totalTopics: topicCount,
-          totalUsers: userCount
+          totalUsers: userCount,
+          totalQuestions: parseInt(block.question_count) || 0
         },
         imageUrl: block.image_url,
 
@@ -372,6 +373,7 @@ router.get('/loaded', authenticateToken, async (req, res) => {
         stats: {
           totalTopics: topicCount,
           totalUsers: studentCount,
+          totalQuestions: parseInt(block.question_count) || 0,
           loadedAt: loadedAt
         },
         imageUrl: block.image_url,
