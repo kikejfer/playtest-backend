@@ -2150,7 +2150,7 @@ router.put('/admin-assignments/update', authenticateToken, async (req, res) => {
                     admin_id INTEGER REFERENCES users(id),
                     assigned_user_id INTEGER REFERENCES users(id),
                     created_at TIMESTAMP DEFAULT NOW(),
-                    updated_at TIMESTAMP DEFAULT NOW(),
+                    assigned_at TIMESTAMP DEFAULT NOW(),
                     UNIQUE(assigned_user_id)
                 )
             `);
@@ -2176,7 +2176,7 @@ router.put('/admin-assignments/update', authenticateToken, async (req, res) => {
             } else {
                 // Actualizar con nuevo admin
                 await pool.query(
-                    'UPDATE admin_assignments SET admin_id = $1, updated_at = NOW() WHERE assigned_user_id = $2',
+                    'UPDATE admin_assignments SET admin_id = $1, assigned_at = NOW() WHERE assigned_user_id = $2',
                     [admin_id, assigned_user_id]
                 );
                 console.log(`✅ Asignación actualizada: usuario ${assigned_user_id} -> admin ${admin_id}`);
@@ -2184,7 +2184,7 @@ router.put('/admin-assignments/update', authenticateToken, async (req, res) => {
         } else if (admin_id !== null && admin_id !== undefined) {
             // Crear nueva asignación
             await pool.query(
-                'INSERT INTO admin_assignments (admin_id, assigned_user_id, created_at, updated_at) VALUES ($1, $2, NOW(), NOW())',
+                'INSERT INTO admin_assignments (admin_id, assigned_user_id, created_at, assigned_at) VALUES ($1, $2, NOW(), NOW())',
                 [admin_id, assigned_user_id]
             );
             console.log(`✅ Nueva asignación creada: usuario ${assigned_user_id} -> admin ${admin_id}`);
