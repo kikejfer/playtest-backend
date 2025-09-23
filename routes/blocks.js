@@ -206,8 +206,10 @@ router.get('/available', authenticateToken, async (req, res) => {
         creatorNickname: block.creator_nickname || 'Unknown',
         isPublic: block.is_public,
         questionCount: parseInt(block.question_count) || 0,
-        topicCount: topicCount,
-        userCount: userCount,
+        stats: {
+          totalTopics: topicCount,
+          totalUsers: userCount
+        },
         imageUrl: block.image_url,
 
         // Metadata IDs for filtering
@@ -367,9 +369,11 @@ router.get('/loaded', authenticateToken, async (req, res) => {
         creatorNickname: block.creator_nickname || 'Unknown',
         isPublic: block.is_public,
         questionCount: parseInt(block.question_count) || 0,
-        topicCount: topicCount,
-        studentCount: studentCount,
-        loadedAt: loadedAt,
+        stats: {
+          totalTopics: topicCount,
+          totalUsers: studentCount,
+          loadedAt: loadedAt
+        },
         imageUrl: block.image_url,
         questions: questions
       });
