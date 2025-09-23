@@ -475,22 +475,7 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
     for (const block of blocksResult.rows) {
       console.log(`🔍 Processing block ${block.id}: ${block.name}`);
       
-      // For loaded blocks, we don't need full question details, just basic info
-      const questionsResult = await pool.query(`
-        SELECT q.id, q.text_question, q.topic, q.block_id, q.difficulty
-        FROM questions q
-        WHERE q.block_id = $1
-        ORDER BY q.id
-      `, [block.id]);
-
-      console.log(`🔍 Block ${block.id} has ${questionsResult.rows.length} questions`);
-
-      const questions = questionsResult.rows.map(question => ({
-        id: question.id,
-        text_question: question.text_question,
-        topic: question.topic,
-        difficulty: question.difficulty
-      }));
+      console.log(`🔍 Block ${block.id} has ${block.question_count} questions`);
 
       // Calculate statistics efficiently:
 
@@ -551,7 +536,6 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
         creator_nickname: block.creator_nickname,
         creator_id: block.creator_id,
         created_with_role: block.created_with_role,
-        questions: questions,
         stats: {
           totalQuestions: totalQuestions,
           totalTopics: totalTopics,
