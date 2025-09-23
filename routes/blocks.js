@@ -475,16 +475,10 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
     for (const block of blocksResult.rows) {
       console.log(`🔍 Processing block ${block.id}: ${block.name}`);
       
-      // Get questions for this block
+      // For loaded blocks, we don't need full question details, just basic info
       const questionsResult = await pool.query(`
-        SELECT q.id, q.text_question, q.topic, q.block_id, q.difficulty, q.explanation,
-               COALESCE(a.answer_a, '') as answer_a,
-               COALESCE(a.answer_b, '') as answer_b,
-               COALESCE(a.answer_c, '') as answer_c,
-               COALESCE(a.answer_d, '') as answer_d,
-               COALESCE(a.correct_answer, '') as correct_answer
+        SELECT q.id, q.text_question, q.topic, q.block_id, q.difficulty
         FROM questions q
-        LEFT JOIN answers a ON q.id = a.question_id
         WHERE q.block_id = $1
         ORDER BY q.id
       `, [block.id]);
@@ -495,15 +489,7 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
         id: question.id,
         text_question: question.text_question,
         topic: question.topic,
-        difficulty: question.difficulty,
-        explanation: question.explanation,
-        answers: {
-          A: question.answer_a,
-          B: question.answer_b,
-          C: question.answer_c,
-          D: question.answer_d
-        },
-        correct_answer: question.correct_answer
+        difficulty: question.difficulty
       }));
 
       // Calculate statistics efficiently:
