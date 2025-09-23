@@ -451,8 +451,8 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
       return res.json([]);
     }
     
-    const placeholders = loadedBlockIds.map((_, index) => `$${index + 2}`).join(',');
-    
+    const placeholders = loadedBlockIds.map((_, index) => `$${index + 1}`).join(',');
+
     const blocksResult = await pool.query(`
       SELECT b.id, b.name, b.description, b.observaciones, b.user_role_id, b.is_public, b.created_at, b.image_url,
         u.nickname as creator_nickname,
@@ -466,7 +466,7 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
       LEFT JOIN block_answers ba ON b.id = ba.block_id
       WHERE b.id IN (${placeholders})
       ORDER BY b.created_at DESC
-    `, [req.user.id, ...loadedBlockIds]);
+    `, loadedBlockIds);
 
     console.log('🔍 Found blocks from query:', blocksResult.rows.length);
 
