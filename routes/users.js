@@ -671,4 +671,40 @@ router.put('/me/roles', authenticateToken, async (req, res) => {
   }
 });
 
+// Get user ID by nickname - NEW endpoint for admin-panel-helper
+router.post('/get-id', async (req, res) => {
+  try {
+    const { nickname } = req.body;
+
+    // Validate input
+    if (!nickname) {
+      return res.status(400).json({ error: 'Nickname is required' });
+    }
+
+    console.log(`🔍 GET-ID endpoint - Looking up user ID for nickname: "${nickname}"`);
+
+    // Query users table to find ID by nickname
+    const result = await pool.query(`
+      SELECT id FROM users WHERE nickname = $1
+    `, [nickname]);
+
+    if (result.rows.length === 0) {
+      console.log(`❌ GET-ID endpoint - User not found for nickname: "${nickname}"`);
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const userId = result.rows[0].id;
+    console.log(`✅ GET-ID endpoint - Found user ID ${userId} for nickname: "${nickname}"`);
+
+    res.json({
+      id: userId,
+      nickname: nickname
+    });
+
+  } catch (error) {
+    console.error('Error getting user ID by nickname:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 module.exports = router;
