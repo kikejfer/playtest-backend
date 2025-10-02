@@ -2149,8 +2149,8 @@ router.put('/admin-assignments/update', authenticateToken, async (req, res) => {
                     id SERIAL PRIMARY KEY,
                     admin_id INTEGER REFERENCES users(id),
                     assigned_user_id INTEGER REFERENCES users(id),
-                    created_at TIMESTAMP DEFAULT NOW(),
-                    assigned_at TIMESTAMP DEFAULT NOW(),
+                    assigned_by INTEGER REFERENCES users(id),
+                    assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(assigned_user_id)
                 )
             `);
@@ -2184,7 +2184,7 @@ router.put('/admin-assignments/update', authenticateToken, async (req, res) => {
         } else if (admin_id !== null && admin_id !== undefined) {
             // Crear nueva asignación
             await pool.query(
-                'INSERT INTO admin_assignments (admin_id, assigned_user_id, created_at, assigned_at) VALUES ($1, $2, NOW(), NOW())',
+                'INSERT INTO admin_assignments (admin_id, assigned_user_id, assigned_at) VALUES ($1, $2, NOW())',
                 [admin_id, assigned_user_id]
             );
             console.log(`✅ Nueva asignación creada: usuario ${assigned_user_id} -> admin ${admin_id}`);
