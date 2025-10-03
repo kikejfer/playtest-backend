@@ -693,6 +693,16 @@ router.post('/challenges/:id/accept', authenticateToken, async (req, res) => {
     const challengeId = parseInt(req.params.id);
     const userId = req.user.id;
 
+    console.log(`✅ Accept challenge request - challengeId: ${challengeId}, userId: ${userId}`);
+
+    // First check if game exists at all
+    const gameExists = await pool.query('SELECT id, status, created_by FROM games WHERE id = $1', [challengeId]);
+    console.log(`📊 Game exists check:`, gameExists.rows);
+
+    // Check if user is a player
+    const isPlayer = await pool.query('SELECT user_id FROM game_players WHERE game_id = $1 AND user_id = $2', [challengeId, userId]);
+    console.log(`👤 User is player check:`, isPlayer.rows);
+
     // Check if game exists and user is a player
     const gameCheck = await pool.query(`
       SELECT g.*, gp.user_id
@@ -701,7 +711,10 @@ router.post('/challenges/:id/accept', authenticateToken, async (req, res) => {
       WHERE g.id = $1 AND gp.user_id = $2 AND g.status = 'waiting'
     `, [challengeId, userId]);
 
+    console.log(`✅ Final game check result:`, gameCheck.rows);
+
     if (gameCheck.rows.length === 0) {
+      console.log(`❌ Challenge not found - challengeId: ${challengeId}, userId: ${userId}`);
       return res.status(404).json({ error: 'Challenge not found or already accepted' });
     }
 
@@ -736,6 +749,16 @@ router.post('/challenges/:id/decline', authenticateToken, async (req, res) => {
     const challengeId = parseInt(req.params.id);
     const userId = req.user.id;
 
+    console.log(`🚫 Decline challenge request - challengeId: ${challengeId}, userId: ${userId}`);
+
+    // First check if game exists at all
+    const gameExists = await pool.query('SELECT id, status, created_by FROM games WHERE id = $1', [challengeId]);
+    console.log(`📊 Game exists check:`, gameExists.rows);
+
+    // Check if user is a player
+    const isPlayer = await pool.query('SELECT user_id FROM game_players WHERE game_id = $1 AND user_id = $2', [challengeId, userId]);
+    console.log(`👤 User is player check:`, isPlayer.rows);
+
     // Check if game exists and user is a player
     const gameCheck = await pool.query(`
       SELECT g.*, gp.user_id
@@ -744,7 +767,10 @@ router.post('/challenges/:id/decline', authenticateToken, async (req, res) => {
       WHERE g.id = $1 AND gp.user_id = $2 AND g.status = 'waiting'
     `, [challengeId, userId]);
 
+    console.log(`✅ Final game check result:`, gameCheck.rows);
+
     if (gameCheck.rows.length === 0) {
+      console.log(`❌ Challenge not found - challengeId: ${challengeId}, userId: ${userId}`);
       return res.status(404).json({ error: 'Challenge not found or already processed' });
     }
 
