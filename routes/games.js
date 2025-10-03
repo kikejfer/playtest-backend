@@ -226,7 +226,31 @@ router.delete('/configurations/:id', authenticateToken, async (req, res) => {
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
     const gameId = req.params.id;
-    
+
+    // Handle emergency game IDs (frontend fallback mode)
+    if (gameId.startsWith('emergency_')) {
+      console.log(`🚨 Emergency game ID detected: ${gameId}`);
+      return res.json({
+        id: gameId,
+        gameType: 'classic',
+        mode: 'Modo Clásico',
+        config: {
+          blockId: null,
+          questionCount: 10,
+          timeLimit: 300,
+          topics: []
+        },
+        players: [{
+          userId: req.user.id,
+          nickname: req.user.nickname,
+          playerIndex: 0
+        }],
+        status: 'waiting',
+        createdAt: new Date().toISOString(),
+        isEmergencyGame: true
+      });
+    }
+
     // Validate that gameId is a number
     if (isNaN(parseInt(gameId))) {
       return res.status(400).json({ error: 'Invalid game ID' });
