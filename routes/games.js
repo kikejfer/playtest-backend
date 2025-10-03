@@ -513,7 +513,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 
     // Get game details including creator and participants
     const gameCheck = await pool.query(
-      'SELECT created_by, player1_id, player2_id, mode FROM games WHERE id = $1',
+      'SELECT created_by FROM games WHERE id = $1',
       [gameId]
     );
 
@@ -523,25 +523,28 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     }
 
     const game = gameCheck.rows[0];
+
+    // Check if user is a participant in the game
+    const playerCheck = await pool.query(
+      'SELECT user_id FROM game_players WHERE game_id = $1 AND user_id = $2',
+      [gameId, req.user.id]
+    );
+
     console.log(`🔍 Game details:`, {
       gameId,
       created_by: game.created_by,
-      player1_id: game.player1_id,
-      player2_id: game.player2_id,
-      mode: game.mode,
-      requesting_user: req.user.id
+      requesting_user: req.user.id,
+      is_participant: playerCheck.rows.length > 0
     });
 
     // Check if user is authorized (creator or participant)
     const isCreator = game.created_by === req.user.id;
-    const isPlayer1 = game.player1_id === req.user.id;
-    const isPlayer2 = game.player2_id === req.user.id;
-    const isAuthorized = isCreator || isPlayer1 || isPlayer2;
+    const isParticipant = playerCheck.rows.length > 0;
+    const isAuthorized = isCreator || isParticipant;
 
     console.log(`🔐 Authorization check:`, {
       isCreator,
-      isPlayer1, 
-      isPlayer2,
+      isParticipant,
       isAuthorized
     });
 
