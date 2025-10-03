@@ -641,11 +641,45 @@ function calculateScore(correct, total) {
 router.get('/challenges/:userId', authenticateToken, async (req, res) => {
   try {
     const userId = parseInt(req.params.userId);
-    
-    // For now, return empty array as challenges are not fully implemented
-    // In the future, this could query a challenges table
-    const challenges = [];
-    
+
+    // Get games where user is a player and status is 'waiting' (pending challenges)
+    const result = await pool.query(`
+      SELECT g.*,
+        json_agg(
+          json_build_object(
+            'userId', gp.user_id,
+            'nickname', gp.nickname,
+            'playerIndex', gp.player_index
+          ) ORDER BY gp.player_index
+        ) as players
+      FROM games g
+      JOIN game_players gp ON g.id = gp.game_id
+      WHERE gp.user_id = $1
+        AND g.status = 'waiting'
+      GROUP BY g.id
+      ORDER BY g.created_at DESC
+    `, [userId]);
+
+    const challenges = result.rows.map(game => {
+      // Determine if this is an incoming or outgoing challenge
+      const currentUserPlayer = game.players.find(p => p.userId === userId);
+      const otherPlayer = game.players.find(p => p.userId !== userId);
+      const isIncoming = game.created_by !== userId;
+
+      return {
+        id: game.id,
+        gameType: game.game_type,
+        mode: getGameModeDisplay(game.game_type),
+        config: game.config,
+        status: 'pending',
+        direction: isIncoming ? 'incoming' : 'outgoing',
+        challenger: isIncoming ? otherPlayer : currentUserPlayer,
+        challenged: isIncoming ? currentUserPlayer : otherPlayer,
+        createdAt: game.created_at,
+        players: game.players
+      };
+    });
+
     res.json(challenges);
   } catch (error) {
     console.error('Error fetching challenges:', error);
