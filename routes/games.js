@@ -83,11 +83,14 @@ router.get('/history', authenticateToken, async (req, res) => {
       return {
         gameId: row.game_id,
         mode: getGameModeDisplay(row.game_type),
+        gameMode: getGameModeDisplay(row.game_type),
         blockName: row.block_name || 'Unknown Block',
         correct: correctAnswers,
         incorrect: incorrectAnswers,
         blank: blankAnswers,
+        totalQuestions: totalBlockQuestions,
         date: row.created_at,
+        createdAt: row.created_at,
         score: calculateScore(correctAnswers, totalBlockQuestions),
         status: row.status // Add status for debugging
       };
