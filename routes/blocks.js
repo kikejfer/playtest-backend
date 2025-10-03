@@ -1945,4 +1945,33 @@ router.get('/:blockId/questions', authenticateToken, async (req, res) => {
   }
 });
 
+// Obtener todos los temas únicos de un bloque desde topic_answers
+router.get('/:blockId/topics', authenticateToken, async (req, res) => {
+  try {
+    const blockId = parseInt(req.params.blockId);
+    console.log('🔍 Getting topics for block:', blockId, 'user:', req.user.id);
+
+    // Get unique topics from topic_answers table
+    const topicsResult = await pool.query(`
+      SELECT DISTINCT topic
+      FROM topic_answers
+      WHERE block_id = $1
+      ORDER BY topic
+    `, [blockId]);
+
+    const topics = topicsResult.rows.map(row => row.topic);
+
+    console.log('✅ Returning', topics.length, 'unique topics for block:', blockId);
+    res.json(topics);
+
+  } catch (error) {
+    console.error('❌ Error getting block topics:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      details: error.message,
+      endpoint: '/blocks/:blockId/topics'
+    });
+  }
+});
+
 module.exports = router;
