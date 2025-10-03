@@ -258,8 +258,18 @@ router.get('/:id', authenticateToken, async (req, res) => {
     if (isNaN(parseInt(gameId))) {
       return res.status(400).json({ error: 'Invalid game ID' });
     }
+    // First check if game exists at all
+    const gameCheck = await pool.query('SELECT id, game_type, status FROM games WHERE id = $1', [gameId]);
+
+    if (gameCheck.rows.length === 0) {
+      console.log(`❌ Game ${gameId} does not exist in games table`);
+      return res.status(404).json({ error: 'Game not found' });
+    }
+
+    console.log(`✅ Game ${gameId} exists:`, gameCheck.rows[0]);
+
     const gameResult = await pool.query(`
-      SELECT g.*, 
+      SELECT g.*,
         json_agg(
           json_build_object(
             'userId', gp.user_id,
@@ -274,6 +284,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
     `, [gameId]);
 
     if (gameResult.rows.length === 0) {
+      console.log(`❌ Game ${gameId} exists but has no players in game_players table`);
       return res.status(404).json({ error: 'Game not found' });
     }
 
