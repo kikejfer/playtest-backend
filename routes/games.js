@@ -687,6 +687,87 @@ router.get('/challenges/:userId', authenticateToken, async (req, res) => {
   }
 });
 
+// Accept a challenge
+router.post('/challenges/:id/accept', authenticateToken, async (req, res) => {
+  try {
+    const challengeId = parseInt(req.params.id);
+    const userId = req.user.id;
+
+    // Check if game exists and user is a player
+    const gameCheck = await pool.query(`
+      SELECT g.*, gp.user_id
+      FROM games g
+      JOIN game_players gp ON g.id = gp.game_id
+      WHERE g.id = $1 AND gp.user_id = $2 AND g.status = 'waiting'
+    `, [challengeId, userId]);
+
+    if (gameCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Challenge not found or already accepted' });
+    }
+
+    const game = gameCheck.rows[0];
+
+    // Only the challenged user (not the creator) can accept
+    if (game.created_by === userId) {
+      return res.status(403).json({ error: 'Cannot accept your own challenge' });
+    }
+
+    // Update game status to 'active'
+    await pool.query(`
+      UPDATE games
+      SET status = 'active', updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+    `, [challengeId]);
+
+    res.json({
+      success: true,
+      message: 'Challenge accepted',
+      gameId: challengeId
+    });
+  } catch (error) {
+    console.error('Error accepting challenge:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Decline a challenge
+router.post('/challenges/:id/decline', authenticateToken, async (req, res) => {
+  try {
+    const challengeId = parseInt(req.params.id);
+    const userId = req.user.id;
+
+    // Check if game exists and user is a player
+    const gameCheck = await pool.query(`
+      SELECT g.*, gp.user_id
+      FROM games g
+      JOIN game_players gp ON g.id = gp.game_id
+      WHERE g.id = $1 AND gp.user_id = $2 AND g.status = 'waiting'
+    `, [challengeId, userId]);
+
+    if (gameCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Challenge not found or already processed' });
+    }
+
+    const game = gameCheck.rows[0];
+
+    // Only the challenged user (not the creator) can decline
+    if (game.created_by === userId) {
+      return res.status(403).json({ error: 'Cannot decline your own challenge' });
+    }
+
+    // Delete the game (or mark as declined)
+    await pool.query('DELETE FROM games WHERE id = $1', [challengeId]);
+
+    res.json({
+      success: true,
+      message: 'Challenge declined'
+    });
+  } catch (error) {
+    console.error('Error declining challenge:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Get game history for a specific user
 router.get('/history/:userId', authenticateToken, async (req, res) => {
   try {
