@@ -1,11 +1,37 @@
 const express = require('express');
 const router = express.Router();
-const { Pool } = require('pg');
+const { pool } = require('../database/connection');
 const { authenticateToken } = require('../middleware/auth');
 
-const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+// ==================== GAME CHALLENGES (Player vs Player) ====================
+
+// Create a game challenge (player challenges another player to a game)
+router.post('/', authenticateToken, async (req, res) => {
+    try {
+        const { challengedUserId, gameConfig } = req.body;
+
+        if (!challengedUserId || !gameConfig) {
+            return res.status(400).json({ error: 'challengedUserId and gameConfig are required' });
+        }
+
+        // Create a challenge record
+        const result = await pool.query(`
+            INSERT INTO game_challenges (
+                challenger_id, challenged_id, game_config, status, created_at
+            ) VALUES ($1, $2, $3, 'pending', CURRENT_TIMESTAMP)
+            RETURNING id, created_at
+        `, [req.user.id, challengedUserId, JSON.stringify(gameConfig)]);
+
+        res.status(201).json({
+            success: true,
+            challengeId: result.rows[0].id,
+            message: 'Challenge sent successfully'
+        });
+
+    } catch (error) {
+        console.error('Error creating game challenge:', error);
+        res.status(500).json({ error: 'Internal server error', details: error.message });
+    }
 });
 
 // ==================== GESTIÓN DE RETOS ====================
