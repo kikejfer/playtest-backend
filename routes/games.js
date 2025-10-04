@@ -671,7 +671,7 @@ router.get('/challenges/:userId', authenticateToken, async (req, res) => {
         gameType: game.game_type,
         mode: getGameModeDisplay(game.game_type),
         config: game.config,
-        status: 'pending',
+        status: game.status,  // Use actual status from database instead of hardcoding 'pending'
         direction: isIncoming ? 'incoming' : 'outgoing',
         challenger: isIncoming ? otherPlayer : currentUserPlayer,
         challenged: isIncoming ? currentUserPlayer : otherPlayer,
