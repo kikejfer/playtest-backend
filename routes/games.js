@@ -8,17 +8,22 @@ const router = express.Router();
 router.get('/', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT g.*, 
+      SELECT g.*,
         json_agg(
           json_build_object(
-            'userId', gp.user_id,
-            'nickname', gp.nickname,
-            'playerIndex', gp.player_index
-          ) ORDER BY gp.player_index
+            'userId', all_players.user_id,
+            'nickname', u.nickname,
+            'playerIndex', all_players.player_index
+          ) ORDER BY all_players.player_index
         ) as players
       FROM games g
-      JOIN game_players gp ON g.id = gp.game_id
-      WHERE gp.user_id = $1
+      JOIN (
+        SELECT gp.game_id
+        FROM game_players gp
+        WHERE gp.user_id = $1
+      ) user_games ON g.id = user_games.game_id
+      JOIN game_players all_players ON g.id = all_players.game_id
+      JOIN users u ON all_players.user_id = u.id
       GROUP BY g.id
       ORDER BY g.created_at DESC
     `, [req.user.id]);
