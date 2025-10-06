@@ -936,9 +936,30 @@ router.get('/history/:userId', authenticateToken, async (req, res) => {
     const history = await Promise.all(result.rows.map(async (row) => {
       const scoreData = row.score_data || {};
       const config = row.config || {};
+
+      // Handle duel games differently
+      if (row.game_type === 'duel') {
+        const playerScore = scoreData.scores?.p1 || 0;
+        const opponentScore = scoreData.scores?.p2 || 0;
+        const rounds = scoreData.rounds || 0;
+
+        return {
+          gameId: row.game_id,
+          blockName: scoreData.p1 && scoreData.p2 ? `${scoreData.p1} vs ${scoreData.p2}` : 'Duelo',
+          mode: getGameModeDisplay(row.game_type),
+          correct: playerScore,
+          incorrect: opponentScore,
+          blank: 0,
+          total: rounds,
+          score: playerScore > opponentScore ? 10 : (playerScore === opponentScore ? 5 : 0),
+          opponent: scoreData.p2 || null,
+          date: row.created_at
+        };
+      }
+
       const correctAnswers = scoreData.score || 0;
       const totalAnswered = scoreData.totalAnswered || correctAnswers;
-      
+
       // CRITICAL: Calculate questions based on game configuration, not total block questions
       let configuredQuestions = parseInt(row.total_block_questions) || 1; // Default fallback
       
