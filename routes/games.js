@@ -720,6 +720,8 @@ router.post('/challenges/:id/accept', authenticateToken, async (req, res) => {
 
     if (gameCheck.rows.length === 0) {
       console.log(`❌ Challenge not found - challengeId: ${challengeId}, userId: ${userId}`);
+      console.log(`Game exists:`, gameExists.rows);
+      console.log(`Is player:`, isPlayer.rows);
       return res.status(404).json({ error: 'Challenge not found or already accepted' });
     }
 
@@ -727,15 +729,21 @@ router.post('/challenges/:id/accept', authenticateToken, async (req, res) => {
 
     // Only the challenged user (not the creator) can accept
     if (game.created_by === userId) {
+      console.log(`❌ User ${userId} trying to accept their own challenge ${challengeId}`);
       return res.status(403).json({ error: 'Cannot accept your own challenge' });
     }
 
+    console.log(`🔄 Updating game ${challengeId} status to 'active'...`);
+
     // Update game status to 'active'
-    await pool.query(`
+    const updateResult = await pool.query(`
       UPDATE games
       SET status = 'active', updated_at = CURRENT_TIMESTAMP
       WHERE id = $1
+      RETURNING id, status
     `, [challengeId]);
+
+    console.log(`✅ Game status updated:`, updateResult.rows);
 
     // Fetch the complete updated game with players
     const updatedGameResult = await pool.query(`
@@ -745,8 +753,8 @@ router.post('/challenges/:id/accept', authenticateToken, async (req, res) => {
           json_build_object(
             'userId', gp.user_id,
             'nickname', u.nickname,
-            'score', COALESCE(gp.score, 0)
-          )
+            'score', 0
+          ) ORDER BY gp.player_index
         ) as players
       FROM games g
       LEFT JOIN game_players gp ON g.id = gp.game_id
@@ -756,6 +764,7 @@ router.post('/challenges/:id/accept', authenticateToken, async (req, res) => {
     `, [challengeId]);
 
     const updatedGame = updatedGameResult.rows[0];
+    console.log('✅ Successfully updated game and fetched details:', updatedGame);
 
     res.json({
       success: true,
@@ -764,8 +773,10 @@ router.post('/challenges/:id/accept', authenticateToken, async (req, res) => {
       game: updatedGame
     });
   } catch (error) {
-    console.error('Error accepting challenge:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('❌ Error accepting challenge - Full error:', error);
+    console.error('Error stack:', error.stack);
+    console.error('Error details:', { challengeId, userId, errorMessage: error.message });
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
