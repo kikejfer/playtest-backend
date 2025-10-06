@@ -732,10 +732,31 @@ router.post('/challenges/:id/accept', authenticateToken, async (req, res) => {
       WHERE id = $1
     `, [challengeId]);
 
+    // Fetch the complete updated game with players
+    const updatedGameResult = await pool.query(`
+      SELECT
+        g.*,
+        json_agg(
+          json_build_object(
+            'userId', gp.user_id,
+            'nickname', u.nickname,
+            'score', COALESCE(gp.score, 0)
+          )
+        ) as players
+      FROM games g
+      LEFT JOIN game_players gp ON g.id = gp.game_id
+      LEFT JOIN users u ON gp.user_id = u.id
+      WHERE g.id = $1
+      GROUP BY g.id
+    `, [challengeId]);
+
+    const updatedGame = updatedGameResult.rows[0];
+
     res.json({
       success: true,
       message: 'Challenge accepted',
-      gameId: challengeId
+      gameId: challengeId,
+      game: updatedGame
     });
   } catch (error) {
     console.error('Error accepting challenge:', error);
