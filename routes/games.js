@@ -838,6 +838,70 @@ router.post('/challenges/:id/decline', authenticateToken, async (req, res) => {
   }
 });
 
+// Abandon a game (mark as loss for abandoner)
+router.post('/:id/abandon', authenticateToken, async (req, res) => {
+  try {
+    const gameId = parseInt(req.params.id);
+    const userId = req.user.id;
+
+    console.log(`🏳️ Abandon game request - gameId: ${gameId}, userId: ${userId}`);
+
+    // Get game and player info
+    const gameResult = await pool.query(`
+      SELECT g.*, gp.player_index
+      FROM games g
+      JOIN game_players gp ON g.id = gp.game_id
+      WHERE g.id = $1 AND gp.user_id = $2 AND g.status = 'active'
+    `, [gameId, userId]);
+
+    if (gameResult.rows.length === 0) {
+      console.log(`❌ Game not found or not active - gameId: ${gameId}, userId: ${userId}`);
+      return res.status(404).json({ error: 'Game not found or not active' });
+    }
+
+    const game = gameResult.rows[0];
+    const abandonerIndex = game.player_index;
+    const winnerIndex = abandonerIndex === 0 ? 1 : 0;
+
+    // Get winner info
+    const winnerResult = await pool.query(`
+      SELECT user_id, nickname
+      FROM game_players gp
+      JOIN users u ON gp.user_id = u.id
+      WHERE gp.game_id = $1 AND gp.player_index = $2
+    `, [gameId, winnerIndex]);
+
+    const winner = winnerResult.rows[0];
+
+    // Update game state to abandoned
+    const updatedGame = await pool.query(`
+      UPDATE games
+      SET status = 'completed',
+          game_state = jsonb_set(
+            COALESCE(game_state, '{}'::jsonb),
+            '{gameState}',
+            '"abandoned"'
+          ) || jsonb_build_object('winner', $1, 'winnerId', $2, 'abandonedBy', $3),
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $4
+      RETURNING *
+    `, [winner.nickname, winner.user_id, userId, gameId]);
+
+    console.log(`✅ Game abandoned - winner: ${winner.nickname} (userId: ${winner.user_id}), abandoner userId: ${userId}`);
+
+    res.json({
+      success: true,
+      message: 'Game abandoned',
+      game: updatedGame.rows[0],
+      winner: winner.nickname
+    });
+  } catch (error) {
+    console.error('❌ Error abandoning game:', error);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+});
+
 // Get game history for a specific user
 router.get('/history/:userId', authenticateToken, async (req, res) => {
   try {
