@@ -733,14 +733,16 @@ router.post('/challenges/:id/accept', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Cannot accept your own challenge' });
     }
 
-    console.log(`🔄 Updating game ${challengeId} status to 'active'...`);
+    console.log(`🔄 Updating game ${challengeId} status to 'active' and initializing game state...`);
 
-    // Update game status to 'active'
+    // Update game status to 'active' and initialize game state for duel
     const updateResult = await pool.query(`
       UPDATE games
-      SET status = 'active', updated_at = CURRENT_TIMESTAMP
+      SET status = 'active',
+          game_state = COALESCE(game_state, '{"gameState": "playing", "turnState": "p1_ready", "round": 0}'::jsonb),
+          updated_at = CURRENT_TIMESTAMP
       WHERE id = $1
-      RETURNING id, status
+      RETURNING id, status, game_state
     `, [challengeId]);
 
     console.log(`✅ Game status updated:`, updateResult.rows);
