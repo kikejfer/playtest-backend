@@ -921,6 +921,7 @@ router.get('/history/:userId', authenticateToken, async (req, res) => {
         b.name as block_name,
         b.id as block_id,
         gp.nickname,
+        gp.player_index,
         (SELECT COUNT(*) FROM questions q WHERE q.block_id = b.id) as total_block_questions
       FROM games g
       JOIN game_players gp ON g.id = gp.game_id
@@ -939,20 +940,30 @@ router.get('/history/:userId', authenticateToken, async (req, res) => {
 
       // Handle duel games differently
       if (row.game_type === 'duel') {
-        const playerScore = scoreData.scores?.p1 || 0;
-        const opponentScore = scoreData.scores?.p2 || 0;
+        // Determine which player is the current user (player_index 0 = p1, 1 = p2)
+        const isPlayer1 = row.player_index === 0;
+        const playerScore = isPlayer1 ? (scoreData.scores?.p1 || 0) : (scoreData.scores?.p2 || 0);
+        const opponentScore = isPlayer1 ? (scoreData.scores?.p2 || 0) : (scoreData.scores?.p1 || 0);
+        const playerName = isPlayer1 ? scoreData.p1 : scoreData.p2;
+        const opponentName = isPlayer1 ? scoreData.p2 : scoreData.p1;
         const rounds = scoreData.rounds || 0;
+
+        // Calculate result from player's perspective
+        const totalQuestions = rounds * 2; // Each round has 2 questions (one per player)
+        const playerAnsweredRounds = Math.min(rounds, playerScore); // Approx questions they answered correctly
+        const incorrect = Math.max(0, rounds - playerScore); // Questions they got wrong
+        const blank = 0; // Duels don't have blanks tracked separately
 
         return {
           gameId: row.game_id,
-          blockName: scoreData.p1 && scoreData.p2 ? `${scoreData.p1} vs ${scoreData.p2}` : 'Duelo',
+          blockName: opponentName ? `vs ${opponentName}` : 'Duelo',
           mode: getGameModeDisplay(row.game_type),
           correct: playerScore,
-          incorrect: opponentScore,
-          blank: 0,
+          incorrect: incorrect,
+          blank: blank,
           total: rounds,
           score: playerScore > opponentScore ? 10 : (playerScore === opponentScore ? 5 : 0),
-          opponent: scoreData.p2 || null,
+          opponent: opponentName || null,
           date: row.created_at
         };
       }
