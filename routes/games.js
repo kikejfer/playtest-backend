@@ -934,7 +934,16 @@ router.get('/history/:userId', authenticateToken, async (req, res) => {
 
     console.log(`Found ${result.rows.length} completed games for user ${userId}`);
 
-    const history = await Promise.all(result.rows.map(async (row) => {
+    // For duel games, we need to deduplicate since each game has 2 players
+    // Keep only unique game_ids
+    const uniqueGames = new Map();
+    result.rows.forEach(row => {
+      if (!uniqueGames.has(row.game_id)) {
+        uniqueGames.set(row.game_id, row);
+      }
+    });
+
+    const history = await Promise.all(Array.from(uniqueGames.values()).map(async (row) => {
       const scoreData = row.score_data || {};
       const config = row.config || {};
 
