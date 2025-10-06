@@ -846,20 +846,37 @@ router.post('/:id/abandon', authenticateToken, async (req, res) => {
 
     console.log(`🏳️ Abandon game request - gameId: ${gameId}, userId: ${userId}`);
 
-    // Get game and player info
+    // Get game and player info - check both active and completed status
     const gameResult = await pool.query(`
       SELECT g.*, gp.player_index
       FROM games g
       JOIN game_players gp ON g.id = gp.game_id
-      WHERE g.id = $1 AND gp.user_id = $2 AND g.status = 'active'
+      WHERE g.id = $1 AND gp.user_id = $2
     `, [gameId, userId]);
 
     if (gameResult.rows.length === 0) {
-      console.log(`❌ Game not found or not active - gameId: ${gameId}, userId: ${userId}`);
-      return res.status(404).json({ error: 'Game not found or not active' });
+      console.log(`❌ Game not found - gameId: ${gameId}, userId: ${userId}`);
+      return res.status(404).json({ error: 'Game not found' });
     }
 
     const game = gameResult.rows[0];
+
+    // If game is already completed, just return success (scores already saved)
+    if (game.status === 'completed') {
+      console.log(`⚠️ Game already completed - gameId: ${gameId}`);
+      return res.json({
+        success: true,
+        message: 'Game already completed',
+        game: game
+      });
+    }
+
+    // Only proceed with abandon if game is still active
+    if (game.status !== 'active') {
+      console.log(`❌ Game status is ${game.status}, cannot abandon`);
+      return res.status(400).json({ error: 'Game is not active' });
+    }
+
     const abandonerIndex = game.player_index;
     const winnerIndex = abandonerIndex === 0 ? 1 : 0;
 
@@ -910,40 +927,38 @@ router.get('/history/:userId', authenticateToken, async (req, res) => {
     console.log(`Fetching game history for user ${userId}`);
     
     // Get complete game history with scores and block information
+    // Use a subquery to get only the user's games, then join to get all needed info
     const result = await pool.query(`
-      SELECT DISTINCT
-        g.id as game_id,
-        g.game_type,
-        g.status,
-        g.config,
-        g.created_at,
+      WITH user_games AS (
+        SELECT DISTINCT g.id, g.game_type, g.status, g.config, g.created_at
+        FROM games g
+        JOIN game_players gp ON g.id = gp.game_id
+        WHERE gp.user_id = $1 AND g.status = 'completed'
+        ORDER BY g.created_at DESC
+        LIMIT 10
+      )
+      SELECT
+        ug.id as game_id,
+        ug.game_type,
+        ug.status,
+        ug.config,
+        ug.created_at,
         gs.score_data,
         b.name as block_name,
         b.id as block_id,
         gp.nickname,
         gp.player_index,
         (SELECT COUNT(*) FROM questions q WHERE q.block_id = b.id) as total_block_questions
-      FROM games g
-      JOIN game_players gp ON g.id = gp.game_id
-      LEFT JOIN game_scores gs ON g.id = gs.game_id
-      LEFT JOIN blocks b ON CAST(b.id as TEXT) = ANY(SELECT jsonb_object_keys(g.config))
-      WHERE gp.user_id = $1 AND g.status = 'completed'
-      ORDER BY g.created_at DESC
-      LIMIT 10
+      FROM user_games ug
+      LEFT JOIN game_scores gs ON ug.id = gs.game_id
+      LEFT JOIN blocks b ON CAST(b.id as TEXT) = ANY(SELECT jsonb_object_keys(ug.config))
+      LEFT JOIN game_players gp ON ug.id = gp.game_id AND gp.user_id = $1
+      ORDER BY ug.created_at DESC
     `, [userId]);
 
     console.log(`Found ${result.rows.length} completed games for user ${userId}`);
 
-    // For duel games, we need to deduplicate since each game has 2 players
-    // Keep only unique game_ids
-    const uniqueGames = new Map();
-    result.rows.forEach(row => {
-      if (!uniqueGames.has(row.game_id)) {
-        uniqueGames.set(row.game_id, row);
-      }
-    });
-
-    const history = await Promise.all(Array.from(uniqueGames.values()).map(async (row) => {
+    const history = await Promise.all(result.rows.map(async (row) => {
       const scoreData = row.score_data || {};
       const config = row.config || {};
 
