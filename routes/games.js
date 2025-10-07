@@ -473,6 +473,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
     const gameId = req.params.id;
     const updates = req.body;
 
+    console.log(`🔄 Update game request - GameID: ${gameId}, UserID: ${req.user.id}`);
+    console.log(`📝 Updates requested:`, JSON.stringify(updates, null, 2));
+
     // Check if user is part of the game
     const playerCheck = await pool.query(
       'SELECT user_id FROM game_players WHERE game_id = $1 AND user_id = $2',
@@ -480,6 +483,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     );
 
     if (playerCheck.rows.length === 0) {
+      console.log(`❌ User ${req.user.id} not authorized to update game ${gameId}`);
       return res.status(403).json({ error: 'Not authorized to update this game' });
     }
 
@@ -496,14 +500,20 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
     if (updates.gameState !== undefined) {
       updateFields.push(`game_state = $${paramCounter}`);
-      updateValues.push(updates.gameState);
+      // Ensure gameState is properly formatted as JSONB
+      updateValues.push(typeof updates.gameState === 'string' ? updates.gameState : JSON.stringify(updates.gameState));
       paramCounter++;
     }
 
     if (updates.config !== undefined) {
       updateFields.push(`config = $${paramCounter}`);
-      updateValues.push(updates.config);
+      updateValues.push(typeof updates.config === 'string' ? updates.config : JSON.stringify(updates.config));
       paramCounter++;
+    }
+
+    if (updateFields.length === 0) {
+      console.log(`⚠️ No valid fields to update for game ${gameId}`);
+      return res.status(400).json({ error: 'No valid fields to update' });
     }
 
     updateFields.push(`updated_at = CURRENT_TIMESTAMP`);
@@ -511,7 +521,12 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
     const query = `UPDATE games SET ${updateFields.join(', ')} WHERE id = $${paramCounter} RETURNING *`;
 
+    console.log(`📊 Executing query:`, query);
+    console.log(`📊 With values:`, updateValues);
+
     const result = await pool.query(query, updateValues);
+
+    console.log(`✅ Game ${gameId} updated successfully`);
 
     res.json({
       message: 'Game updated successfully',
@@ -519,8 +534,10 @@ router.put('/:id', authenticateToken, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error updating game:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('❌ Error updating game:', error);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
