@@ -117,9 +117,10 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
     // Check if user owns the question's block
     const ownerCheck = await client.query(`
-      SELECT b.creator_id 
-      FROM questions q 
-      JOIN blocks b ON q.block_id = b.id 
+      SELECT b.id, ur.user_id
+      FROM questions q
+      JOIN blocks b ON q.block_id = b.id
+      LEFT JOIN user_roles ur ON b.user_role_id = ur.id
       WHERE q.id = $1
     `, [questionId]);
 
@@ -127,7 +128,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Question not found' });
     }
 
-    if (ownerCheck.rows[0].creator_id !== req.user.id) {
+    if (ownerCheck.rows[0].user_id !== req.user.id) {
       return res.status(403).json({ error: 'Not authorized to modify this question' });
     }
 
@@ -167,9 +168,10 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 
     // Check if user owns the question's block
     const ownerCheck = await pool.query(`
-      SELECT b.creator_id 
-      FROM questions q 
-      JOIN blocks b ON q.block_id = b.id 
+      SELECT b.id, ur.user_id
+      FROM questions q
+      JOIN blocks b ON q.block_id = b.id
+      LEFT JOIN user_roles ur ON b.user_role_id = ur.id
       WHERE q.id = $1
     `, [questionId]);
 
@@ -177,7 +179,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Question not found' });
     }
 
-    if (ownerCheck.rows[0].creator_id !== req.user.id) {
+    if (ownerCheck.rows[0].user_id !== req.user.id) {
       return res.status(403).json({ error: 'Not authorized to delete this question' });
     }
 
