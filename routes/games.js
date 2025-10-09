@@ -362,7 +362,9 @@ router.get('/:id/ranking', authenticateToken, async (req, res) => {
       [req.user.id]
     );
 
-    const answerHistory = userResult.rows[0]?.answer_history || [];
+    const rawHistory = userResult.rows[0]?.answer_history;
+    // CRITICAL: Ensure answer_history is always an array
+    const answerHistory = Array.isArray(rawHistory) ? rawHistory : [];
     console.log('📊 Total answer history entries:', answerHistory.length);
 
     // Filter answers for this specific game and calculate game sessions
