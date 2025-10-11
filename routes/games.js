@@ -322,7 +322,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Get game ranking/history for a specific game (for Time Trial, etc.)
+// Get game ranking/history for a specific game (for all game modes)
 router.get('/:id/ranking', authenticateToken, async (req, res) => {
   try {
     const gameId = parseInt(req.params.id);
@@ -358,58 +358,48 @@ router.get('/:id/ranking', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Not authorized to access this game ranking' });
     }
 
-    // Get user's answer history for this specific game configuration
-    const userResult = await pool.query(
-      'SELECT answer_history FROM user_profiles WHERE user_id = $1',
-      [req.user.id]
-    );
+    // Get all scores for this game from game_scores table
+    const scoresResult = await pool.query(`
+      SELECT
+        gs.id,
+        gs.game_id,
+        gs.game_type,
+        gs.score_data,
+        gs.created_at,
+        u.nickname
+      FROM game_scores gs
+      JOIN game_players gp ON gs.game_id = gp.game_id
+      JOIN users u ON gp.user_id = u.id
+      WHERE gs.game_id = $1
+      ORDER BY gs.created_at DESC
+      LIMIT 10
+    `, [gameId]);
 
-    const rawHistory = userResult.rows[0]?.answer_history;
-    // CRITICAL: Ensure answer_history is always an array
-    const answerHistory = Array.isArray(rawHistory) ? rawHistory : [];
-    console.log('📊 Total answer history entries:', answerHistory.length);
+    console.log(`📊 Found ${scoresResult.rows.length} scores for game ${gameId}`);
 
-    // Filter answers for this specific game and calculate game sessions
-    const gameAnswers = answerHistory.filter(entry => entry.gameId === gameId);
-    console.log('📊 Game-specific history entries:', gameAnswers.length);
-
-    // Group by timestamp to identify game sessions (answers within same minute are same session)
-    const gameSessions = {};
-    gameAnswers.forEach(answer => {
-      // Round timestamp to minute to group session answers
-      const sessionKey = answer.timestamp.substring(0, 16); // "YYYY-MM-DDTHH:MM"
-      if (!gameSessions[sessionKey]) {
-        gameSessions[sessionKey] = [];
-      }
-      gameSessions[sessionKey].push(answer);
-    });
-
-    // Calculate stats for each session
-    const sessionStats = Object.entries(gameSessions).map(([sessionTime, answers]) => {
-      const correct = answers.filter(a => a.result === 'ACIERTO').length;
-      const incorrect = answers.filter(a => a.result === 'FALLO').length;
-      const blank = answers.filter(a => a.result === 'BLANCO' || a.result === 'BLANK').length;
-      const total = answers.length;
-      
+    // Format scores for ranking display
+    const ranking = scoresResult.rows.map(row => {
+      const scoreData = row.score_data || {};
       return {
-        timestamp: sessionTime,
-        date: new Date(sessionTime).toISOString(),
-        correct,
-        incorrect,
-        blank,
-        total,
-        percentage: total > 0 ? Math.round((correct / total) * 100) : 0
+        nickname: row.nickname,
+        score: scoreData.score || 0,
+        correct: scoreData.correct || 0,
+        incorrect: scoreData.incorrect || 0,
+        blank: scoreData.blank || 0,
+        total: scoreData.totalQuestions || 0,
+        percentage: scoreData.totalQuestions > 0
+          ? Math.round((scoreData.correct / scoreData.totalQuestions) * 100)
+          : 0,
+        date: row.created_at
       };
     });
 
-    // Sort by correct answers (desc) then by percentage (desc) then by date (desc)
-    const ranking = sessionStats
-      .sort((a, b) => {
-        if (b.correct !== a.correct) return b.correct - a.correct;
-        if (b.percentage !== a.percentage) return b.percentage - a.percentage;
-        return new Date(b.date) - new Date(a.date);
-      })
-      .slice(0, 10); // Top 10
+    // Sort by score (desc) then by correct (desc) then by date (desc)
+    ranking.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      if (b.correct !== a.correct) return b.correct - a.correct;
+      return new Date(b.date) - new Date(a.date);
+    });
 
     console.log('📊 Returning ranking with', ranking.length, 'entries');
     res.json(ranking);
