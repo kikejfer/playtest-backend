@@ -76,7 +76,8 @@ router.get('/history', authenticateToken, async (req, res) => {
     const history = result.rows.map(row => {
       const scoreData = row.score_data || {};
       const totalBlockQuestions = parseInt(row.total_block_questions) || 1;
-      const correctAnswers = scoreData.score || 0;
+      // CRITICAL FIX: Use scoreData.correct (count of correct answers), NOT scoreData.score (calculated 0-10 score)
+      const correctAnswers = scoreData.correct || 0;
       const totalAnswered = scoreData.totalAnswered || correctAnswers; // Questions actually answered
       const incorrectAnswers = Math.max(0, totalAnswered - correctAnswers); // Only count answered incorrect questions
       const blankAnswers = Math.max(0, totalBlockQuestions - totalAnswered); // Unanswered questions
@@ -1011,7 +1012,8 @@ router.get('/history/:userId', authenticateToken, async (req, res) => {
         };
       }
 
-      const correctAnswers = scoreData.score || 0;
+      // CRITICAL FIX: Use scoreData.correct (count of correct answers), NOT scoreData.score (calculated 0-10 score)
+      const correctAnswers = scoreData.correct || 0;
       const totalAnswered = scoreData.totalAnswered || correctAnswers;
 
       // CRITICAL: Calculate questions based on game configuration, not total block questions
