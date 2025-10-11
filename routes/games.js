@@ -75,17 +75,18 @@ router.get('/history', authenticateToken, async (req, res) => {
 
     const history = result.rows.map(row => {
       const scoreData = row.score_data || {};
-      const totalBlockQuestions = parseInt(row.total_block_questions) || 1;
+      // CRITICAL FIX: Use totalQuestions from scoreData (frontend calculated correctly)
+      const totalQuestions = scoreData.totalQuestions || parseInt(row.total_block_questions) || 1;
       // CRITICAL FIX: Use scoreData.correct (count of correct answers), NOT scoreData.score (calculated 0-10 score)
       const correctAnswers = scoreData.correct || 0;
       const totalAnswered = scoreData.totalAnswered || correctAnswers; // Questions actually answered
       const incorrectAnswers = Math.max(0, totalAnswered - correctAnswers); // Only count answered incorrect questions
-      const blankAnswers = Math.max(0, totalBlockQuestions - totalAnswered); // Unanswered questions
-      
+      const blankAnswers = Math.max(0, totalQuestions - totalAnswered); // Unanswered questions
+
       console.log('🎮 Processing game:', row.game_id, 'status:', row.status);
       console.log('📊 ScoreData:', scoreData);
-      console.log('📊 Total questions:', totalBlockQuestions, 'Answered:', totalAnswered, 'Correct:', correctAnswers, 'Incorrect:', incorrectAnswers, 'Blank:', blankAnswers);
-      
+      console.log('📊 Total questions:', totalQuestions, 'Answered:', totalAnswered, 'Correct:', correctAnswers, 'Incorrect:', incorrectAnswers, 'Blank:', blankAnswers);
+
       return {
         gameId: row.game_id,
         mode: getGameModeDisplay(row.game_type),
@@ -94,10 +95,10 @@ router.get('/history', authenticateToken, async (req, res) => {
         correct: correctAnswers,
         incorrect: incorrectAnswers,
         blank: blankAnswers,
-        totalQuestions: totalBlockQuestions,
+        totalQuestions: totalQuestions,
         date: row.created_at,
         createdAt: row.created_at,
-        score: calculateScore(correctAnswers, totalBlockQuestions),
+        score: calculateScore(correctAnswers, totalQuestions),
         status: row.status // Add status for debugging
       };
     });
@@ -1016,48 +1017,10 @@ router.get('/history/:userId', authenticateToken, async (req, res) => {
       const correctAnswers = scoreData.correct || 0;
       const totalAnswered = scoreData.totalAnswered || correctAnswers;
 
-      // CRITICAL: Calculate questions based on game configuration, not total block questions
-      let configuredQuestions = parseInt(row.total_block_questions) || 1; // Default fallback
-      
-      try {
-        // If game has configuration with specific topics, calculate questions for those topics only
-        if (config && Object.keys(config).length > 0) {
-          let totalConfigQuestions = 0;
-          
-          // Iterate through each block in the configuration
-          for (const [blockId, blockConfig] of Object.entries(config)) {
-            if (blockConfig) {
-              if (blockConfig.topics === 'all') {
-                // If all topics are selected, use all block questions
-                totalConfigQuestions += parseInt(row.total_block_questions) || 0;
-              } else if (Array.isArray(blockConfig.topics)) {
-                // Need to query the actual block questions to count topics
-                try {
-                  const blockQuestionsResult = await pool.query(
-                    'SELECT COUNT(*) as count FROM questions WHERE block_id = $1 AND tema = ANY($2)',
-                    [parseInt(blockId), blockConfig.topics]
-                  );
-                  const topicQuestionCount = parseInt(blockQuestionsResult.rows[0]?.count) || 0;
-                  totalConfigQuestions += topicQuestionCount;
-                  console.log(`📊 Block ${blockId}: Found ${topicQuestionCount} questions for topics [${blockConfig.topics.join(', ')}]`);
-                } catch (queryError) {
-                  console.warn(`⚠️ Failed to count questions for block ${blockId}, topics:`, blockConfig.topics, queryError.message);
-                  // Fallback: estimate based on percentage of topics
-                  const estimatedQuestions = Math.round((parseInt(row.total_block_questions) || 0) * blockConfig.topics.length / 10);
-                  totalConfigQuestions += estimatedQuestions;
-                }
-              }
-            }
-          }
-          
-          if (totalConfigQuestions > 0) {
-            configuredQuestions = totalConfigQuestions;
-            console.log(`📊 Game ${row.game_id}: Using configured questions (${configuredQuestions}) instead of total block questions (${row.total_block_questions})`);
-          }
-        }
-      } catch (configError) {
-        console.warn(`⚠️ Error calculating configured questions for game ${row.game_id}, using block total:`, configError.message);
-      }
+      // CRITICAL FIX: Use totalQuestions from scoreData (frontend already calculated correctly)
+      // The frontend knows exactly how many questions were in the game configuration
+      const configuredQuestions = scoreData.totalQuestions || parseInt(row.total_block_questions) || 1;
+      console.log(`📊 Game ${row.game_id}: Using totalQuestions from scoreData: ${configuredQuestions}`);
       
       const incorrectAnswers = Math.max(0, totalAnswered - correctAnswers);
       const blankAnswers = Math.max(0, configuredQuestions - totalAnswered);
