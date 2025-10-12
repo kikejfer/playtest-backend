@@ -1131,22 +1131,22 @@ router.get('/debug/tables', authenticateToken, async (req, res) => {
   try {
     // Check games table structure
     const gamesStructure = await pool.query(`
-      SELECT column_name, data_type 
-      FROM information_schema.columns 
+      SELECT column_name, data_type
+      FROM information_schema.columns
       WHERE table_name = 'games'
     `);
-    
-    // Check game_scores table structure  
+
+    // Check game_scores table structure
     const scoresStructure = await pool.query(`
-      SELECT column_name, data_type 
-      FROM information_schema.columns 
+      SELECT column_name, data_type
+      FROM information_schema.columns
       WHERE table_name = 'game_scores'
     `);
-    
+
     // Check if tables exist and have data
     const gamesCount = await pool.query('SELECT COUNT(*) FROM games');
     const scoresCount = await pool.query('SELECT COUNT(*) FROM game_scores');
-    
+
     res.json({
       games_structure: gamesStructure.rows,
       scores_structure: scoresStructure.rows,
@@ -1156,6 +1156,152 @@ router.get('/debug/tables', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Debug error:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// === GLOBAL LEADERBOARDS ENDPOINTS ===
+
+// Get global leaderboard for a specific block
+router.get('/leaderboards/block/:blockId', authenticateToken, async (req, res) => {
+  try {
+    const blockId = parseInt(req.params.blockId);
+    console.log('🏆 Getting global leaderboard for block:', blockId, 'requested by user:', req.user.id);
+
+    // Get top 10 scores for this block across all users
+    const result = await pool.query(`
+      SELECT
+        u.nickname,
+        gs.game_type,
+        gs.score_data,
+        gs.created_at,
+        g.config
+      FROM game_scores gs
+      JOIN games g ON gs.game_id = g.id
+      JOIN game_players gp ON g.id = gp.game_id
+      JOIN users u ON gp.user_id = u.id
+      WHERE g.status = 'completed'
+        AND g.config::text LIKE '%"' || $1 || '"%'
+      ORDER BY (gs.score_data->>'score')::float DESC, gs.created_at DESC
+      LIMIT 10
+    `, [blockId]);
+
+    console.log(`🏆 Found ${result.rows.length} scores for block ${blockId}`);
+
+    // Format leaderboard data
+    const leaderboard = result.rows.map(row => {
+      const scoreData = row.score_data || {};
+      return {
+        nickname: row.nickname,
+        gameType: row.game_type,
+        gameMode: getGameModeDisplay(row.game_type),
+        score: scoreData.score || 0,
+        correct: scoreData.correct || 0,
+        incorrect: scoreData.incorrect || 0,
+        date: row.created_at
+      };
+    });
+
+    console.log('🏆 Returning global leaderboard with', leaderboard.length, 'entries');
+    res.json(leaderboard);
+
+  } catch (error) {
+    console.error('❌ Error fetching block leaderboard:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      details: error.message,
+      endpoint: '/leaderboards/block/:blockId'
+    });
+  }
+});
+
+// Get global leaderboard for a specific topic
+router.get('/leaderboards/topic/:topicId', authenticateToken, async (req, res) => {
+  try {
+    const topicId = parseInt(req.params.topicId);
+    console.log('🏆 Getting global leaderboard for topic:', topicId, 'requested by user:', req.user.id);
+
+    // Get top 10 scores for games that included this topic
+    const result = await pool.query(`
+      SELECT DISTINCT
+        u.nickname,
+        gs.game_type,
+        gs.score_data,
+        gs.created_at,
+        g.config
+      FROM game_scores gs
+      JOIN games g ON gs.game_id = g.id
+      JOIN game_players gp ON g.id = gp.game_id
+      JOIN users u ON gp.user_id = u.id
+      WHERE g.status = 'completed'
+        AND EXISTS (
+          SELECT 1
+          FROM jsonb_each(g.config) AS config_entry
+          WHERE config_entry.value->>'topics' LIKE '%' || $1 || '%'
+        )
+      ORDER BY (gs.score_data->>'score')::float DESC, gs.created_at DESC
+      LIMIT 10
+    `, [topicId]);
+
+    console.log(`🏆 Found ${result.rows.length} scores for topic ${topicId}`);
+
+    // Format leaderboard data
+    const leaderboard = result.rows.map(row => {
+      const scoreData = row.score_data || {};
+      return {
+        nickname: row.nickname,
+        gameType: row.game_type,
+        gameMode: getGameModeDisplay(row.game_type),
+        score: scoreData.score || 0,
+        correct: scoreData.correct || 0,
+        incorrect: scoreData.incorrect || 0,
+        date: row.created_at
+      };
+    });
+
+    console.log('🏆 Returning global leaderboard for topic with', leaderboard.length, 'entries');
+    res.json(leaderboard);
+
+  } catch (error) {
+    console.error('❌ Error fetching topic leaderboard:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      details: error.message,
+      endpoint: '/leaderboards/topic/:topicId'
+    });
+  }
+});
+
+// Get user's blocks (blocks they have played games with)
+router.get('/leaderboards/user-blocks', authenticateToken, async (req, res) => {
+  try {
+    console.log('📚 Getting blocks for user:', req.user.id);
+
+    // Get distinct blocks from user's completed games
+    const result = await pool.query(`
+      SELECT DISTINCT
+        b.id,
+        b.name,
+        b.description,
+        COUNT(DISTINCT g.id) as game_count
+      FROM games g
+      JOIN game_players gp ON g.id = gp.game_id
+      JOIN blocks b ON CAST(b.id as TEXT) = ANY(SELECT jsonb_object_keys(g.config))
+      WHERE gp.user_id = $1
+        AND g.status = 'completed'
+      GROUP BY b.id, b.name, b.description
+      ORDER BY game_count DESC, b.name ASC
+    `, [req.user.id]);
+
+    console.log(`📚 Found ${result.rows.length} blocks for user ${req.user.id}`);
+    res.json(result.rows);
+
+  } catch (error) {
+    console.error('❌ Error fetching user blocks:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      details: error.message,
+      endpoint: '/leaderboards/user-blocks'
+    });
   }
 });
 
