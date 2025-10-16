@@ -94,6 +94,7 @@ const userPreferencesRoutes = require('./routes/user-preferences');
 const gameStatesRoutes = require('./routes/game-states');
 const creatorsPanelRoutes = require('./routes/creators-panel');
 const testMetadataRoutes = require('./routes/test-metadata');
+const groupsRoutes = require('./routes/groups');
 
 // Use routes
 app.use('/api/auth', authRoutes);
@@ -113,6 +114,7 @@ app.use('/api/user-preferences', userPreferencesRoutes);
 app.use('/api/game-states', gameStatesRoutes);
 app.use('/api/creators-panel', creatorsPanelRoutes);
 app.use('/api/test-metadata', testMetadataRoutes);
+app.use('/api/groups', groupsRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {

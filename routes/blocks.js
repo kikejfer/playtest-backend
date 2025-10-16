@@ -12,9 +12,10 @@ const imageSearch = new ImageSearchService();
 router.get('/', authenticateToken, async (req, res) => {
   try {
     console.log('🔍 /blocks endpoint called for user:', req.user.id);
-    
+
     const blocksResult = await pool.query(`
-      SELECT b.id, b.name, b.description, b.observaciones, b.user_role_id, b.is_public, b.created_at, b.image_url,
+      SELECT DISTINCT b.id, b.name, b.description, b.observaciones, b.user_role_id, b.is_public, b.created_at, b.image_url,
+        b.block_scope,
         u.nickname as creator_nickname,
         u.id as creator_id,
         r.name as created_with_role,
@@ -24,7 +25,19 @@ router.get('/', authenticateToken, async (req, res) => {
       LEFT JOIN users u ON ur.user_id = u.id
       LEFT JOIN roles r ON ur.role_id = r.id
       LEFT JOIN block_answers ba ON b.id = ba.block_id
-      WHERE b.is_public = true OR ur.user_id = $1
+      LEFT JOIN block_assignments bla ON b.id = bla.block_id
+      LEFT JOIN group_members gm ON bla.group_id = gm.group_id
+      WHERE (
+        -- Show public blocks (PUBLICO scope or NULL)
+        (b.block_scope = 'PUBLICO' OR b.block_scope IS NULL)
+        OR
+        -- Show class blocks (CLASE scope) if user has access
+        (b.block_scope = 'CLASE' AND (
+          b.owner_user_id = $1  -- User owns the block
+          OR bla.assigned_to_user = $1  -- Block assigned directly to user
+          OR gm.user_id = $1  -- User is member of a group that has this block assigned
+        ))
+      )
       ORDER BY b.created_at DESC
     `, [req.user.id]);
     
@@ -104,8 +117,8 @@ router.get('/available', authenticateToken, async (req, res) => {
     console.log('🔍 Total public blocks:', testQuery.rows[0]?.total || 0);
     
     const blocksResult = await pool.query(`
-      SELECT b.id, b.name, b.description, b.observaciones, b.user_role_id, b.is_public, b.created_at, b.image_url,
-        b.tipo_id, b.nivel_id, b.estado_id,
+      SELECT DISTINCT b.id, b.name, b.description, b.observaciones, b.user_role_id, b.is_public, b.created_at, b.image_url,
+        b.tipo_id, b.nivel_id, b.estado_id, b.block_scope,
         u.nickname as creator_nickname,
         u.id as creator_id,
         r.name as created_with_role,
@@ -121,9 +134,21 @@ router.get('/available', authenticateToken, async (req, res) => {
       LEFT JOIN block_types bt ON b.tipo_id = bt.id
       LEFT JOIN block_levels bl ON b.nivel_id = bl.id
       LEFT JOIN block_states bs ON b.estado_id = bs.id
-      WHERE b.is_public = true
+      LEFT JOIN block_assignments bla ON b.id = bla.block_id
+      LEFT JOIN group_members gm ON bla.group_id = gm.group_id
+      WHERE (
+        -- Show public blocks (PUBLICO scope or NULL)
+        (b.block_scope = 'PUBLICO' OR b.block_scope IS NULL)
+        OR
+        -- Show class blocks (CLASE scope) if user has access
+        (b.block_scope = 'CLASE' AND (
+          b.owner_user_id = $1  -- User owns the block
+          OR bla.assigned_to_user = $1  -- Block assigned directly to user
+          OR gm.user_id = $1  -- User is member of a group that has this block assigned
+        ))
+      )
       ORDER BY b.created_at DESC
-    `);
+    `, [req.user.id]);
 
     console.log('🔍 Found blocks:', blocksResult.rows.length);
 
@@ -262,10 +287,11 @@ router.get('/loaded', authenticateToken, async (req, res) => {
       return res.json([]);
     }
     
-    // Get the actual blocks that are loaded
+    // Get the actual blocks that are loaded (with access control)
     const placeholders = loadedBlockIds.map((_, index) => `$${index + 2}`).join(',');
     const blocksResult = await pool.query(`
-      SELECT b.id, b.name, b.description, b.observaciones, b.user_role_id, b.is_public, b.created_at, b.image_url,
+      SELECT DISTINCT b.id, b.name, b.description, b.observaciones, b.user_role_id, b.is_public, b.created_at, b.image_url,
+        b.block_scope,
         u.nickname as creator_nickname,
         u.id as creator_id,
         r.name as created_with_role,
@@ -275,9 +301,22 @@ router.get('/loaded', authenticateToken, async (req, res) => {
       LEFT JOIN users u ON ur.user_id = u.id
       LEFT JOIN roles r ON ur.role_id = r.id
       LEFT JOIN block_answers ba ON b.id = ba.block_id
+      LEFT JOIN block_assignments bla ON b.id = bla.block_id
+      LEFT JOIN group_members gm ON bla.group_id = gm.group_id
       WHERE b.id = ANY($1)
+        AND (
+          -- Show public blocks (PUBLICO scope or NULL)
+          (b.block_scope = 'PUBLICO' OR b.block_scope IS NULL)
+          OR
+          -- Show class blocks (CLASE scope) if user has access
+          (b.block_scope = 'CLASE' AND (
+            b.owner_user_id = $2  -- User owns the block
+            OR bla.assigned_to_user = $2  -- Block assigned directly to user
+            OR gm.user_id = $2  -- User is member of a group that has this block assigned
+          ))
+        )
       ORDER BY b.created_at DESC
-    `, [loadedBlockIds]);
+    `, [loadedBlockIds, req.user.id]);
 
     console.log('🔍 Found loaded blocks:', blocksResult.rows.length);
 
@@ -437,17 +476,18 @@ router.get('/loaded-stats', authenticateToken, async (req, res) => {
     const userRoleId = userRoleResult.rows[0].user_role_id;
     console.log('👤 User role ID for query:', userRoleId, 'Role:', userRoleResult.rows[0].role_name);
 
-    // Get user profile to see which blocks are loaded
-    const userResult = await pool.query(
-      'SELECT loaded_blocks FROM user_profiles WHERE user_id = $1',
-      [req.user.id]
-    );
+    // Get loaded blocks for this specific role from user_loaded_blocks table
+    const loadedBlocksResult = await pool.query(`
+      SELECT block_id
+      FROM user_loaded_blocks
+      WHERE user_id = $1 AND user_role_id = $2
+    `, [req.user.id, userRoleId]);
 
-    const loadedBlockIds = userResult.rows[0]?.loaded_blocks || [];
+    const loadedBlockIds = loadedBlocksResult.rows.map(row => row.block_id);
     console.log('🔍 Loaded block IDs for role', actualRoleName, ':', loadedBlockIds);
-    
+
     if (loadedBlockIds.length === 0) {
-      console.log('✅ No loaded blocks, returning empty array');
+      console.log('✅ No loaded blocks for this role, returning empty array');
       return res.json([]);
     }
     
@@ -665,48 +705,111 @@ router.get('/created', authenticateToken, async (req, res) => {
   }
 });
 
-// Load a block (add to user's loaded blocks)
+// Load a block (add to user's loaded blocks) - UPDATED TO USE user_loaded_blocks with user_role_id
 router.post('/:id/load', authenticateToken, async (req, res) => {
   try {
     const blockId = parseInt(req.params.id);
-    
-    // Check if block exists and is accessible (public OR owned by user)
-    const blockResult = await pool.query(
-      'SELECT b.id, ur.user_id as creator_id, b.is_public FROM blocks b LEFT JOIN user_roles ur ON b.user_role_id = ur.id WHERE b.id = $1 AND (b.is_public = true OR ur.user_id = $2)',
-      [blockId, req.user.id]
-    );
-    
+
+    // Check if block exists and is accessible with new access control
+    const blockResult = await pool.query(`
+      SELECT DISTINCT b.id, ur.user_id as creator_id, b.is_public, b.block_scope
+      FROM blocks b
+      LEFT JOIN user_roles ur ON b.user_role_id = ur.id
+      LEFT JOIN block_assignments bla ON b.id = bla.block_id
+      LEFT JOIN group_members gm ON bla.group_id = gm.group_id
+      WHERE b.id = $1
+        AND (
+          -- Show public blocks (PUBLICO scope or NULL)
+          (b.block_scope = 'PUBLICO' OR b.block_scope IS NULL)
+          OR
+          -- Show class blocks (CLASE scope) if user has access
+          (b.block_scope = 'CLASE' AND (
+            b.owner_user_id = $2  -- User owns the block
+            OR bla.assigned_to_user = $2  -- Block assigned directly to user
+            OR gm.user_id = $2  -- User is member of a group that has this block assigned
+          ))
+        )
+    `, [blockId, req.user.id]);
+
     if (blockResult.rows.length === 0) {
       return res.status(404).json({ error: 'Block not found or not accessible' });
     }
-    
-    // Get current loaded blocks
-    const userResult = await pool.query(
-      'SELECT loaded_blocks FROM user_profiles WHERE user_id = $1',
-      [req.user.id]
-    );
-    
-    let loadedBlocks = userResult.rows[0]?.loaded_blocks || [];
-    
-    // Ensure loadedBlocks is an array
-    if (!Array.isArray(loadedBlocks)) {
-      console.warn('⚠️ loaded_blocks is not an array, converting:', loadedBlocks);
-      loadedBlocks = [];
+
+    // Get current active role from header
+    const currentRole = req.headers['x-current-role'];
+    if (!currentRole) {
+      return res.status(400).json({ error: 'Current role header is required' });
     }
-    
-    // Add block if not already loaded
-    if (!loadedBlocks.includes(blockId)) {
-      loadedBlocks.push(blockId);
-      
-      // Update user profile - ensure all required fields exist
+
+    // Map panel codes from frontend to database role names
+    const panelToRoleMapping = {
+      'PCC': 'creador',
+      'PPF': 'profesor',
+      'PJG': 'jugador',
+      'PAP': 'administrador_principal',
+      'PAS': 'administrador_secundario'
+    };
+
+    const actualRoleName = panelToRoleMapping[currentRole] || currentRole;
+    console.log('🎭 Loading block with role:', currentRole, '-> Database role:', actualRoleName);
+
+    // Get user's specific user_role record for the current active role
+    const userRoleResult = await pool.query(`
+      SELECT ur.id as user_role_id
+      FROM user_roles ur
+      JOIN roles r ON ur.role_id = r.id
+      WHERE ur.user_id = $1 AND r.name = $2
+      LIMIT 1
+    `, [req.user.id, actualRoleName]);
+
+    if (userRoleResult.rows.length === 0) {
+      return res.status(403).json({ error: 'User does not have the specified role' });
+    }
+
+    const userRoleId = userRoleResult.rows[0].user_role_id;
+    console.log('👤 User role ID for loading block:', userRoleId);
+
+    // Insert into user_loaded_blocks with user_role_id (will fail if already exists due to UNIQUE constraint)
+    try {
       await pool.query(`
-        INSERT INTO user_profiles (user_id, loaded_blocks, stats, answer_history, preferences) 
-        VALUES ($1, $2::jsonb, '{}'::jsonb, '[]'::jsonb, '{}'::jsonb) 
-        ON CONFLICT (user_id) 
-        DO UPDATE SET loaded_blocks = $2::jsonb, updated_at = CURRENT_TIMESTAMP
-      `, [req.user.id, JSON.stringify(loadedBlocks)]);
+        INSERT INTO user_loaded_blocks (user_id, block_id, user_role_id, loaded_at)
+        VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+        ON CONFLICT (user_id, block_id, user_role_id) DO NOTHING
+      `, [req.user.id, blockId, userRoleId]);
+
+      console.log(`✅ Block ${blockId} loaded for user ${req.user.id} with role ID ${userRoleId}`);
+    } catch (dbError) {
+      console.error('❌ Error inserting into user_loaded_blocks:', dbError.message);
+      return res.status(500).json({ error: 'Failed to load block' });
     }
-    
+
+    // ALSO update user_profiles.loaded_blocks for backwards compatibility
+    try {
+      const userResult = await pool.query(
+        'SELECT loaded_blocks FROM user_profiles WHERE user_id = $1',
+        [req.user.id]
+      );
+
+      let loadedBlocks = userResult.rows[0]?.loaded_blocks || [];
+
+      if (!Array.isArray(loadedBlocks)) {
+        loadedBlocks = [];
+      }
+
+      if (!loadedBlocks.includes(blockId)) {
+        loadedBlocks.push(blockId);
+
+        await pool.query(`
+          INSERT INTO user_profiles (user_id, loaded_blocks, stats, answer_history, preferences)
+          VALUES ($1, $2::jsonb, '{}'::jsonb, '[]'::jsonb, '{}'::jsonb)
+          ON CONFLICT (user_id)
+          DO UPDATE SET loaded_blocks = $2::jsonb, updated_at = CURRENT_TIMESTAMP
+        `, [req.user.id, JSON.stringify(loadedBlocks)]);
+      }
+    } catch (profileError) {
+      console.warn('⚠️ Could not update user_profiles, but block was loaded in user_loaded_blocks');
+    }
+
     res.json({ message: 'Block loaded successfully' });
   } catch (error) {
     console.error('Error loading block:', error);
@@ -714,36 +817,96 @@ router.post('/:id/load', authenticateToken, async (req, res) => {
   }
 });
 
-// Unload a block (remove from user's loaded blocks)
+// Unload a block (remove from user's loaded blocks) - UPDATED TO USE user_loaded_blocks with user_role_id
 router.delete('/:id/load', authenticateToken, async (req, res) => {
   try {
     const blockId = parseInt(req.params.id);
-    
-    // Get current loaded blocks
-    const userResult = await pool.query(
-      'SELECT loaded_blocks FROM user_profiles WHERE user_id = $1',
-      [req.user.id]
-    );
-    
-    let loadedBlocks = userResult.rows[0]?.loaded_blocks || [];
-    
-    // Ensure loadedBlocks is an array
-    if (!Array.isArray(loadedBlocks)) {
-      console.warn('⚠️ loaded_blocks is not an array, converting:', loadedBlocks);
-      loadedBlocks = [];
+
+    // Get current active role from header
+    const currentRole = req.headers['x-current-role'];
+    if (!currentRole) {
+      return res.status(400).json({ error: 'Current role header is required' });
     }
-    
-    // Remove block
-    loadedBlocks = loadedBlocks.filter(id => id !== blockId);
-    
-    // Update user profile
-    await pool.query(`
-      INSERT INTO user_profiles (user_id, loaded_blocks, stats, answer_history, preferences) 
-      VALUES ($1, $2::jsonb, '{}'::jsonb, '[]'::jsonb, '{}'::jsonb) 
-      ON CONFLICT (user_id) 
-      DO UPDATE SET loaded_blocks = $2::jsonb, updated_at = CURRENT_TIMESTAMP
-    `, [req.user.id, JSON.stringify(loadedBlocks)]);
-    
+
+    // Map panel codes from frontend to database role names
+    const panelToRoleMapping = {
+      'PCC': 'creador',
+      'PPF': 'profesor',
+      'PJG': 'jugador',
+      'PAP': 'administrador_principal',
+      'PAS': 'administrador_secundario'
+    };
+
+    const actualRoleName = panelToRoleMapping[currentRole] || currentRole;
+    console.log('🎭 Unloading block with role:', currentRole, '-> Database role:', actualRoleName);
+
+    // Get user's specific user_role record for the current active role
+    const userRoleResult = await pool.query(`
+      SELECT ur.id as user_role_id
+      FROM user_roles ur
+      JOIN roles r ON ur.role_id = r.id
+      WHERE ur.user_id = $1 AND r.name = $2
+      LIMIT 1
+    `, [req.user.id, actualRoleName]);
+
+    if (userRoleResult.rows.length === 0) {
+      return res.status(403).json({ error: 'User does not have the specified role' });
+    }
+
+    const userRoleId = userRoleResult.rows[0].user_role_id;
+    console.log('👤 User role ID for unloading block:', userRoleId);
+
+    // Delete from user_loaded_blocks with user_role_id
+    const deleteResult = await pool.query(`
+      DELETE FROM user_loaded_blocks
+      WHERE user_id = $1 AND block_id = $2 AND user_role_id = $3
+    `, [req.user.id, blockId, userRoleId]);
+
+    if (deleteResult.rowCount === 0) {
+      console.log(`⚠️ Block ${blockId} was not loaded for user ${req.user.id} with role ID ${userRoleId}`);
+    } else {
+      console.log(`✅ Block ${blockId} unloaded for user ${req.user.id} with role ID ${userRoleId}`);
+    }
+
+    // ALSO remove from user_profiles.loaded_blocks for backwards compatibility
+    // Only if no other role has this block loaded
+    try {
+      const otherRoleLoaded = await pool.query(`
+        SELECT COUNT(*) as count
+        FROM user_loaded_blocks
+        WHERE user_id = $1 AND block_id = $2 AND user_role_id != $3
+      `, [req.user.id, blockId, userRoleId]);
+
+      if (parseInt(otherRoleLoaded.rows[0].count) === 0) {
+        // No other role has this block, remove from user_profiles too
+        const userResult = await pool.query(
+          'SELECT loaded_blocks FROM user_profiles WHERE user_id = $1',
+          [req.user.id]
+        );
+
+        let loadedBlocks = userResult.rows[0]?.loaded_blocks || [];
+
+        if (!Array.isArray(loadedBlocks)) {
+          loadedBlocks = [];
+        }
+
+        loadedBlocks = loadedBlocks.filter(id => id !== blockId);
+
+        await pool.query(`
+          INSERT INTO user_profiles (user_id, loaded_blocks, stats, answer_history, preferences)
+          VALUES ($1, $2::jsonb, '{}'::jsonb, '[]'::jsonb, '{}'::jsonb)
+          ON CONFLICT (user_id)
+          DO UPDATE SET loaded_blocks = $2::jsonb, updated_at = CURRENT_TIMESTAMP
+        `, [req.user.id, JSON.stringify(loadedBlocks)]);
+
+        console.log('✅ Also removed from user_profiles.loaded_blocks');
+      } else {
+        console.log('ℹ️  Block still loaded by another role, keeping in user_profiles.loaded_blocks');
+      }
+    } catch (profileError) {
+      console.warn('⚠️ Could not update user_profiles, but block was unloaded from user_loaded_blocks');
+    }
+
     res.json({ message: 'Block unloaded successfully' });
   } catch (error) {
     console.error('Error unloading block:', error);
@@ -755,13 +918,28 @@ router.delete('/:id/load', authenticateToken, async (req, res) => {
 router.post('/:id/load-block', authenticateToken, async (req, res) => {
   try {
     const blockId = parseInt(req.params.id);
-    
-    // Check if block exists and is accessible (public OR owned by user)
-    const blockResult = await pool.query(
-      'SELECT b.id, ur.user_id as creator_id, b.is_public FROM blocks b LEFT JOIN user_roles ur ON b.user_role_id = ur.id WHERE b.id = $1 AND (b.is_public = true OR ur.user_id = $2)',
-      [blockId, req.user.id]
-    );
-    
+
+    // Check if block exists and is accessible with new access control
+    const blockResult = await pool.query(`
+      SELECT DISTINCT b.id, ur.user_id as creator_id, b.is_public, b.block_scope
+      FROM blocks b
+      LEFT JOIN user_roles ur ON b.user_role_id = ur.id
+      LEFT JOIN block_assignments bla ON b.id = bla.block_id
+      LEFT JOIN group_members gm ON bla.group_id = gm.group_id
+      WHERE b.id = $1
+        AND (
+          -- Show public blocks (PUBLICO scope or NULL)
+          (b.block_scope = 'PUBLICO' OR b.block_scope IS NULL)
+          OR
+          -- Show class blocks (CLASE scope) if user has access
+          (b.block_scope = 'CLASE' AND (
+            b.owner_user_id = $2  -- User owns the block
+            OR bla.assigned_to_user = $2  -- Block assigned directly to user
+            OR gm.user_id = $2  -- User is member of a group that has this block assigned
+          ))
+        )
+    `, [blockId, req.user.id]);
+
     if (blockResult.rows.length === 0) {
       return res.status(404).json({ error: 'Block not found or not accessible' });
     }
